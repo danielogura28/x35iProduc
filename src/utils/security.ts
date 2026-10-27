@@ -10,8 +10,7 @@
 // Salt fixo para proteção contra ataques de dicionário e rainbow tables
 const SECURITY_SALT = 'petropol_extrucontrol_salt_2026_dr';
 
-// Hash SHA-256 pré-calculado para o PIN inicial '3535' com o salt acima:
-// sha256("3535:petropol_extrucontrol_salt_2026_dr")
+// Hash criptográfico seguro SHA-256 pré-calculado com o salt de segurança:
 const DEFAULT_PIN_HASH = '9aa6b014b6f95207054ea9f1647146129460cd16b3bace0699a64a2c530fc2ad';
 
 const STORAGE_HASH_KEY = 'extrucontrol_supervisor_hash_v1';

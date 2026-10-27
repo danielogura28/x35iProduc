@@ -49,7 +49,7 @@ export default function App() {
   const [isSupervisorActive, setIsSupervisorActive] = useState<boolean>(isSupervisorAuthenticated);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
   const [pinModalTitle, setPinModalTitle] = useState<string>('Autenticação de Supervisão');
-  const [pinModalDescription, setPinModalDescription] = useState<string>('Digite a senha de acesso (padrão: 3535).');
+  const [pinModalDescription, setPinModalDescription] = useState<string>('Digite a senha de acesso da supervisão.');
   const [pendingAuthorizedAction, setPendingAuthorizedAction] = useState<(() => void) | null>(null);
 
   // Estado do Modal de Gestão de Armazenamento
@@ -117,7 +117,7 @@ export default function App() {
     setHistoryMachineFilter(machineId);
   };
 
-  // Controle de Abas Protegidas por Senha (3535)
+  // Controle de Abas Restritas à Gestão
   const handleTabSelect = (tab: 'monitor' | 'entry' | 'history' | 'charts' | 'report') => {
     if (tab === 'monitor' || tab === 'entry') {
       setActiveTab(tab);
@@ -135,7 +135,7 @@ export default function App() {
         report: 'o Relatório Mensal e Metas'
       };
       setPinModalTitle('Acesso Restrito à Gestão');
-      setPinModalDescription(`Para visualizar ${tabNames[tab] || 'esta área'}, informe a senha de acesso (padrão: 3535).`);
+      setPinModalDescription(`Para visualizar ${tabNames[tab] || 'esta área'}, informe a senha de acesso da supervisão.`);
       setPendingAuthorizedAction(() => () => {
         setIsSupervisorActive(true);
         setActiveTab(tab);
@@ -151,7 +151,7 @@ export default function App() {
       action();
     } else {
       setPinModalTitle('Autorização de Gestão');
-      setPinModalDescription('Esta operação requer autorização da supervisão. Digite a senha (padrão: 3535).');
+      setPinModalDescription('Esta operação requer autorização da supervisão. Digite a senha de acesso.');
       setPendingAuthorizedAction(() => () => {
         setIsSupervisorActive(true);
         action();
@@ -185,7 +185,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col text-slate-800">
-      {/* Modal de Autenticação com Senha (3535) */}
+      {/* Modal de Autenticação da Supervisão */}
       <PinPromptModal
         isOpen={isPinModalOpen}
         onClose={() => {

@@ -283,7 +283,7 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
           <button
             onClick={handleExportExcel}
             className="px-3.5 py-2 text-xs font-bold text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-400 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-            title="Exportar Dashboard Visual em Excel com gráficos de barras em células, análise de Pareto, Scorecards e ranking (Requer senha 3535)"
+            title="Exportar Dashboard Visual em Excel com gráficos de barras em células, análise de Pareto, Scorecards e ranking (Requer autorização da gestão)"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
             <span>Exportar Dashboard Excel (.xlsx)</span>
