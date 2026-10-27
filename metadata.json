@@ -1,0 +1,6 @@
+{
+  "name": "ExtruControl - Coleta e Gestão Operacional de Extrusoras",
+  "description": "Sistema de apontamento operacional em chão de fábrica para extrusoras DR01-DR06, controle de ficha de processo, desvios, inspeção de peneira/ímã/selagem, paradas e relatórios gerenciais com gráficos e PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
