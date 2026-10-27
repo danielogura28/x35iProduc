@@ -264,16 +264,92 @@ export function getProductionRecords(): ProductionRecord[] {
   }
 }
 
-export function saveProductionRecord(record: ProductionRecord): void {
+export const MAX_STORAGE_RECORDS = 3000;
+
+export interface StorageCapacityInfo {
+  count: number;
+  max: number;
+  percentage: number;
+  isFull: boolean;
+  isNearFull: boolean;
+  remaining: number;
+}
+
+export function getStorageCapacity(recordsCount?: number): StorageCapacityInfo {
+  const count = recordsCount !== undefined ? recordsCount : getProductionRecords().length;
+  const percentage = Math.min(100, Math.round((count / MAX_STORAGE_RECORDS) * 1000) / 10);
+  return {
+    count,
+    max: MAX_STORAGE_RECORDS,
+    percentage,
+    isFull: count >= MAX_STORAGE_RECORDS,
+    isNearFull: count >= MAX_STORAGE_RECORDS * 0.85,
+    remaining: Math.max(0, MAX_STORAGE_RECORDS - count)
+  };
+}
+
+export function saveProductionRecord(record: ProductionRecord): { success: boolean; error?: string } {
   const current = getProductionRecords();
+  const isExisting = current.some(r => r.id === record.id);
+  
+  if (!isExisting && current.length >= MAX_STORAGE_RECORDS) {
+    return {
+      success: false,
+      error: `Capacidade máxima de armazenamento atingida (${MAX_STORAGE_RECORDS} registros). Exclua registros antigos no Histórico para liberar espaço.`
+    };
+  }
+
   const updated = [record, ...current.filter(r => r.id !== record.id)];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  const capped = updated.slice(0, MAX_STORAGE_RECORDS);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(capped));
+  return { success: true };
 }
 
 export function deleteProductionRecord(id: string): void {
   const current = getProductionRecords();
   const updated = current.filter(r => r.id !== id);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+}
+
+export function bulkDeleteRecords(ids: string[]): void {
+  const idSet = new Set(ids);
+  const current = getProductionRecords();
+  const updated = current.filter(r => !idSet.has(r.id));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+}
+
+export function deleteOldestRecords(countToDelete: number): number {
+  const current = getProductionRecords();
+  if (current.length === 0) return 0;
+  const sorted = [...current].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const keepCount = Math.max(0, sorted.length - countToDelete);
+  const updated = sorted.slice(0, keepCount);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  return sorted.length - updated.length;
+}
+
+export function deleteRecordsBeforeDate(isoDateStr: string): number {
+  const current = getProductionRecords();
+  const targetTime = new Date(isoDateStr).getTime();
+  const updated = current.filter(r => new Date(r.timestamp).getTime() >= targetTime);
+  const deletedCount = current.length - updated.length;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  return deletedCount;
+}
+
+export function clearAllProductionRecords(): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+}
+
+export function exportAllRecordsJSON(): void {
+  const records = getProductionRecords();
+  const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(records, null, 2));
+  const downloadAnchor = document.createElement('a');
+  downloadAnchor.setAttribute('href', dataStr);
+  downloadAnchor.setAttribute('download', `ExtruControl_Backup_Completo_${new Date().toISOString().slice(0, 10)}.json`);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
 }
 
 export function getFactoryGoals(): FactoryMonthlyGoals {

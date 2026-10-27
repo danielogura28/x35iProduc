@@ -17,20 +17,25 @@ import {
   Camera,
   Calendar,
   Sliders,
-  CalendarClock
+  CalendarClock,
+  FileSpreadsheet,
+  Lock
 } from 'lucide-react';
 import { exportToCSV } from '../utils/storage';
+import { exportMonthlyReportToExcel } from '../utils/excelExport';
 
 interface MonthlyReportProps {
   records: ProductionRecord[];
   factoryGoals: FactoryMonthlyGoals;
   onUpdateGoals: (newGoals: FactoryMonthlyGoals) => void;
+  onRequestPinAuth?: (action: () => void) => void;
 }
 
 export const MonthlyReport: React.FC<MonthlyReportProps> = ({
   records,
   factoryGoals,
-  onUpdateGoals
+  onUpdateGoals,
+  onRequestPinAuth
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
   const [showGoalEditor, setShowGoalEditor] = useState<boolean>(false);
@@ -222,6 +227,18 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
     window.print();
   };
 
+  const handleExportExcel = () => {
+    const runExport = () => {
+      exportMonthlyReportToExcel(records, selectedMonth, factoryGoals);
+    };
+
+    if (onRequestPinAuth) {
+      onRequestPinAuth(runExport);
+    } else {
+      runExport();
+    }
+  };
+
   const handleSaveGoals = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateGoals(editingGoals);
@@ -264,11 +281,21 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
           </button>
 
           <button
+            onClick={handleExportExcel}
+            className="px-3.5 py-2 text-xs font-bold text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-400 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Exportar Dashboard Visual em Excel com gráficos de barras em células, análise de Pareto, Scorecards e ranking (Requer senha 3535)"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+            <span>Exportar Dashboard Excel (.xlsx)</span>
+            <Lock className="w-3 h-3 text-emerald-600" />
+          </button>
+
+          <button
             onClick={() => exportToCSV(monthRecords)}
             className="px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Exportar CSV</span>
+            <span>CSV</span>
           </button>
 
           <button
@@ -276,7 +303,7 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
             className="px-4 py-2 text-xs font-bold text-white bg-red-800 hover:bg-red-900 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Printer className="w-4 h-4" />
-            <span>Imprimir / Gerar PDF</span>
+            <span>Imprimir / PDF</span>
           </button>
         </div>
       </div>

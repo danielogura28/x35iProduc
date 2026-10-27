@@ -20,14 +20,17 @@ import {
   Sliders, 
   CalendarClock, 
   PowerOff,
+  HardDrive,
   X 
 } from 'lucide-react';
+import { MAX_STORAGE_RECORDS } from '../utils/storage';
 
 interface HistoryTableProps {
   records: ProductionRecord[];
   onDeleteRecord: (id: string) => void;
   selectedMachineFilter?: MachineId | 'ALL';
   onClearMachineFilter?: () => void;
+  onOpenStorageManager?: () => void;
 }
 
 export const HistoryTable: React.FC<HistoryTableProps> = ({
@@ -35,6 +38,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
   onDeleteRecord,
   selectedMachineFilter = 'ALL',
   onClearMachineFilter,
+  onOpenStorageManager
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [machineFilter, setMachineFilter] = useState<string>(selectedMachineFilter);
@@ -75,8 +79,71 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
     }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [records, machineFilter, statusFilter, searchTerm]);
 
+  const capacityPct = Math.min(100, Math.round((records.length / MAX_STORAGE_RECORDS) * 1000) / 10);
+  const isCapacityFull = records.length >= MAX_STORAGE_RECORDS;
+
   return (
     <div className="space-y-4">
+      {/* Storage Capacity Bar & Management */}
+      <div className={`rounded-xl border p-4 shadow-xs transition-colors ${
+        isCapacityFull ? 'bg-red-50 border-red-300' : 'bg-white border-slate-200'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+              isCapacityFull ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-700'
+            }`}>
+              <HardDrive className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-900">
+                  Capacidade de Histórico:
+                </span>
+                <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-full border ${
+                  isCapacityFull 
+                    ? 'bg-red-200 text-red-950 border-red-300 animate-pulse' 
+                    : capacityPct >= 85 
+                    ? 'bg-amber-100 text-amber-900 border-amber-200' 
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                }`}>
+                  {records.length.toLocaleString('pt-BR')} / {MAX_STORAGE_RECORDS.toLocaleString('pt-BR')} ({capacityPct}%)
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                {isCapacityFull
+                  ? 'Atingiu 100% da capacidade permitida. Exclua registros antigos para salvar novas coletas com segurança.'
+                  : 'Armazenamento de alta performance para até 3.000 apontamentos com gráficos e relatórios.'}
+              </p>
+            </div>
+          </div>
+
+          {onOpenStorageManager && (
+            <button
+              onClick={onOpenStorageManager}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer shadow-xs ${
+                isCapacityFull
+                  ? 'bg-red-700 hover:bg-red-800 text-white'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-600" />
+              <span>Gerenciar / Liberar Espaço</span>
+            </button>
+          )}
+        </div>
+
+        {/* Barra de Progresso */}
+        <div className="w-full bg-slate-200 rounded-full h-2 mt-3 overflow-hidden">
+          <div 
+            className={`h-full transition-all duration-300 rounded-full ${
+              capacityPct >= 95 ? 'bg-red-600' : capacityPct >= 80 ? 'bg-amber-500' : 'bg-emerald-600'
+            }`}
+            style={{ width: `${Math.min(100, capacityPct)}%` }}
+          ></div>
+        </div>
+      </div>
+
       {/* Search and Filters Header */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
