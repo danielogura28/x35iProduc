@@ -63,6 +63,7 @@ export type StoppageReason =
   | 'Setup / Limpeza' 
   | 'Falta de Material' 
   | 'Desvio de Processo'
+  | 'Ajuste de Processo'
   | 'Qualidade / Teste'
   | 'Outro';
 
@@ -73,6 +74,7 @@ export const STOPPAGE_REASONS_LIST: StoppageReason[] = [
   'Setup / Limpeza',
   'Falta de Material',
   'Desvio de Processo',
+  'Ajuste de Processo',
   'Qualidade / Teste',
   'Outro'
 ];
@@ -210,3 +212,15 @@ export interface FactoryMonthlyGoals {
   maxStoppageHoursPerMachine: number;
   targetLabelComplianceRate: number;
 }
+
+export interface GlobalLineStatusConfig {
+  status: LineOperationalStatus;
+  setupMaterial?: string;
+  maintenanceOrderNumber?: string;
+  notes?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export type GlobalLineStatuses = Record<MachineId, GlobalLineStatusConfig>;
+

@@ -12,7 +12,8 @@ import {
   MachineId, 
   FactoryMonthlyGoals,
   Operator,
-  ShiftLeader
+  ShiftLeader,
+  GlobalLineStatuses
 } from './types/production';
 import { 
   getProductionRecords, 
@@ -24,6 +25,8 @@ import {
   saveOperators,
   getShiftLeaders,
   saveShiftLeaders,
+  getGlobalLineStatuses,
+  saveGlobalLineStatuses,
   exportToCSV,
   MAX_STORAGE_RECORDS
 } from './utils/storage';
@@ -41,6 +44,7 @@ export default function App() {
   const [factoryGoals, setFactoryGoals] = useState<FactoryMonthlyGoals>(getFactoryGoals());
   const [operators, setOperators] = useState<Operator[]>(getOperators);
   const [shiftLeaders, setShiftLeaders] = useState<ShiftLeader[]>(getShiftLeaders);
+  const [globalLineStatuses, setGlobalLineStatuses] = useState<GlobalLineStatuses>(getGlobalLineStatuses);
   const [entryPreselectedMachine, setEntryPreselectedMachine] = useState<MachineId>('DR01');
   const [historyMachineFilter, setHistoryMachineFilter] = useState<MachineId | 'ALL'>('ALL');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -104,6 +108,13 @@ export default function App() {
     setFactoryGoals(newGoals);
     showToast('Metas industriais mensais atualizadas com sucesso.');
   };
+
+  const handleUpdateGlobalLineStatuses = (updated: GlobalLineStatuses) => {
+    saveGlobalLineStatuses(updated);
+    setGlobalLineStatuses(updated);
+    showToast('Status operacional das 6 linhas atualizado com sucesso.');
+  };
+
 
   const handleNewEntryClick = (machineId?: MachineId) => {
     if (machineId) {
@@ -232,6 +243,8 @@ export default function App() {
         {activeTab === 'monitor' && (
           <LineMonitor
             records={records}
+            globalLineStatuses={globalLineStatuses}
+            onUpdateGlobalLineStatuses={handleUpdateGlobalLineStatuses}
             onSelectMachineForEntry={handleNewEntryClick}
             onFilterHistoryByMachine={handleFilterHistoryByMachine}
           />

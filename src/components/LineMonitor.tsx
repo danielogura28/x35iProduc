@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   ProductionRecord, 
   MachineId, 
   MACHINE_LIST,
-  LINE_STATUS_CONFIG 
+  LINE_STATUS_CONFIG,
+  GlobalLineStatuses 
 } from '../types/production';
 import { 
   PlusCircle, 
@@ -17,20 +18,27 @@ import {
   ShieldAlert, 
   Layers, 
   CheckCircle2,
-  AlertTriangle 
+  AlertTriangle,
+  Zap
 } from 'lucide-react';
+import { GlobalLineStatusModal } from './GlobalLineStatusModal';
 
 interface LineMonitorProps {
   records: ProductionRecord[];
+  globalLineStatuses: GlobalLineStatuses;
+  onUpdateGlobalLineStatuses: (statuses: GlobalLineStatuses) => void;
   onSelectMachineForEntry: (machineId: MachineId) => void;
   onFilterHistoryByMachine: (machineId: MachineId) => void;
 }
 
 export const LineMonitor: React.FC<LineMonitorProps> = ({
   records,
+  globalLineStatuses,
+  onUpdateGlobalLineStatuses,
   onSelectMachineForEntry,
   onFilterHistoryByMachine,
 }) => {
+  const [isGlobalModalOpen, setIsGlobalModalOpen] = useState<boolean>(false);
   const getLatestRecordForMachine = (machineId: MachineId): ProductionRecord | undefined => {
     const machineRecords = records.filter(r => r.machineId === machineId);
     if (machineRecords.length === 0) return undefined;
@@ -100,6 +108,27 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
               </span>
             </div>
           </div>
+        </div>
+
+        {/* Global Line Status Bar */}
+        <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-700">
+            <span className="p-1 rounded bg-amber-100 text-amber-800">
+              <Zap className="w-3.5 h-3.5" />
+            </span>
+            <span>
+              <strong>Definição Global de Linhas:</strong> Configure os status das 6 extrusoras para preenchimento rápido no turno.
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsGlobalModalOpen(true)}
+            className="px-4 py-2 text-xs font-bold text-white bg-red-900 hover:bg-red-800 rounded-lg shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer hover:scale-[1.01]"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-300" />
+            <span>Definir Status Global das Linhas</span>
+          </button>
         </div>
       </div>
 
@@ -213,6 +242,20 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                     <span className="truncate max-w-[130px]">{statusTheme.label}</span>
                   </div>
                 </div>
+
+                {/* Global Status Preset Badge */}
+                {globalLineStatuses?.[machineId] && (
+                  <div className="mt-2.5 flex items-center justify-between text-[11px] bg-slate-50 px-2.5 py-1 rounded-md border border-slate-100">
+                    <span className="text-slate-500 flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-amber-600" />
+                      Status Global:
+                    </span>
+                    <span className="font-semibold text-slate-800">
+                      {LINE_STATUS_CONFIG[globalLineStatuses[machineId].status]?.label || 'Em Produção'}
+                    </span>
+                  </div>
+                )}
+
 
                 {/* Content according to Line Status */}
                 {latest ? (
@@ -398,6 +441,15 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
           );
         })}
       </div>
+
+      {/* Global Line Status Modal */}
+      <GlobalLineStatusModal
+        isOpen={isGlobalModalOpen}
+        onClose={() => setIsGlobalModalOpen(false)}
+        currentStatuses={globalLineStatuses}
+        onStatusesUpdated={onUpdateGlobalLineStatuses}
+      />
     </div>
   );
 };
+

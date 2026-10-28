@@ -39,6 +39,7 @@ import {
   Gauge
 } from 'lucide-react';
 import { TeamManagerModal } from './TeamManagerModal';
+import { getGlobalLineStatuses } from '../utils/storage';
 
 interface EntryFormProps {
   initialMachine?: MachineId;
@@ -72,12 +73,36 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   const [shiftLeader, setShiftLeader] = useState<string>(() => shiftLeaders[0]?.name || 'Fernando Rocha');
   const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
 
-  // Status inicial mandatório
-  const [lineStatus, setLineStatus] = useState<LineOperationalStatus>('em_producao');
+  // Status inicial mandatório baseado na configuração global da linha
+  const [lineStatus, setLineStatus] = useState<LineOperationalStatus>(() => {
+    const globalConfig = getGlobalLineStatuses();
+    return globalConfig[initialMachine]?.status || 'em_producao';
+  });
 
   // Campos específicos
-  const [setupMaterial, setSetupMaterial] = useState<string>('');
-  const [maintenanceOrderNumber, setMaintenanceOrderNumber] = useState<string>('');
+  const [setupMaterial, setSetupMaterial] = useState<string>(() => {
+    const globalConfig = getGlobalLineStatuses();
+    return globalConfig[initialMachine]?.setupMaterial || '';
+  });
+  const [maintenanceOrderNumber, setMaintenanceOrderNumber] = useState<string>(() => {
+    const globalConfig = getGlobalLineStatuses();
+    return globalConfig[initialMachine]?.maintenanceOrderNumber || '';
+  });
+
+  const handleMachineChange = (newMachine: MachineId) => {
+    setMachineId(newMachine);
+    const globalConfig = getGlobalLineStatuses();
+    const preset = globalConfig[newMachine];
+    if (preset) {
+      setLineStatus(preset.status);
+      if (preset.setupMaterial) {
+        setSetupMaterial(preset.setupMaterial);
+      }
+      if (preset.maintenanceOrderNumber) {
+        setMaintenanceOrderNumber(preset.maintenanceOrderNumber);
+      }
+    }
+  };
 
   // Campos quando Em Produção
   const [productionOrder, setProductionOrder] = useState<string>('OP-48230');
@@ -527,7 +552,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                 <button
                   type="button"
                   key={m}
-                  onClick={() => setMachineId(m)}
+                  onClick={() => handleMachineChange(m)}
                   className={`py-3 px-2 rounded-lg font-mono font-bold text-sm transition-all border cursor-pointer ${
                     machineId === m
                       ? 'bg-red-900 text-white border-red-950 ring-2 ring-red-400 shadow-sm'
@@ -542,9 +567,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 
           {/* Status Inicial da Linha */}
           <div>
-            <label className="block text-xs font-bold text-slate-900 mb-2">
-              1.2 Status Operacional da Extrusora {machineId}:
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-bold text-slate-900">
+                1.2 Status Operacional da Extrusora {machineId}:
+              </label>
+              <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                Padrão Global: <strong className="text-slate-800">{LINE_STATUS_CONFIG[getGlobalLineStatuses()[machineId]?.status || 'em_producao']?.label}</strong>
+              </span>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
               <button
                 type="button"

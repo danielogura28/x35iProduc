@@ -19,10 +19,14 @@ import {
   Sliders,
   CalendarClock,
   FileSpreadsheet,
-  Lock
+  Lock,
+  FileText,
+  BarChart3
 } from 'lucide-react';
 import { exportToCSV } from '../utils/storage';
 import { exportMonthlyReportToExcel } from '../utils/excelExport';
+import { DailyReport } from './DailyReport';
+import { PowerBIDashboard } from './PowerBIDashboard';
 
 interface MonthlyReportProps {
   records: ProductionRecord[];
@@ -37,6 +41,7 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
   onUpdateGoals,
   onRequestPinAuth
 }) => {
+  const [reportView, setReportView] = useState<'powerbi' | 'daily' | 'monthly'>('powerbi');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
   const [showGoalEditor, setShowGoalEditor] = useState<boolean>(false);
   const [editingGoals, setEditingGoals] = useState<FactoryMonthlyGoals>(factoryGoals);
@@ -247,10 +252,72 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Action Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center gap-3">
-          <Calendar className="w-5 h-5 text-red-800" />
+      {/* Top Segmented View Switcher: Power BI vs Diário vs Mensal */}
+      <div className="flex items-center justify-between flex-wrap gap-4 print:hidden">
+        <div className="inline-flex bg-slate-200/90 p-1 rounded-xl border border-slate-300">
+          <button
+            type="button"
+            onClick={() => setReportView('powerbi')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              reportView === 'powerbi'
+                ? 'bg-slate-900 text-amber-300 shadow-sm border border-slate-700'
+                : 'text-slate-700 hover:text-slate-900'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4 text-amber-400" />
+            <span>Dashboard Power BI</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setReportView('daily')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              reportView === 'daily'
+                ? 'bg-red-900 text-white shadow-xs'
+                : 'text-slate-700 hover:text-slate-900'
+            }`}
+          >
+            <Calendar className="w-4 h-4" />
+            <span>Relatório Diário</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setReportView('monthly')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              reportView === 'monthly'
+                ? 'bg-red-900 text-white shadow-xs'
+                : 'text-slate-700 hover:text-slate-900'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Relatório Mensal</span>
+          </button>
+        </div>
+
+        <span className="text-xs text-slate-500 font-medium">
+          Módulo Gerencial de Relatórios • PetroPol
+        </span>
+      </div>
+
+      {reportView === 'powerbi' ? (
+        <PowerBIDashboard
+          records={records}
+          factoryGoals={factoryGoals}
+          onRequestPinAuth={onRequestPinAuth}
+        />
+      ) : reportView === 'daily' ? (
+        <DailyReport
+          records={records}
+          factoryGoals={factoryGoals}
+          onRequestPinAuth={onRequestPinAuth}
+        />
+      ) : (
+        <>
+          {/* Top Action Bar */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
+            <div className="flex items-center gap-3">
+              <Calendar className="w-5 h-5 text-red-800" />
           <div>
             <h2 className="text-base font-bold text-slate-900">
               Relatório Gerencial de Fechamento de Turno & Desempenho Mensal
@@ -792,6 +859,9 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
         </div>
 
       </div>
-    </div>
+    </>
+  )}
+</div>
   );
 };
+

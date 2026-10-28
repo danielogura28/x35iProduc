@@ -129,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>Relatório Mensal</span>
+            <span>Relatórios (Diário / Mensal)</span>
             {!isSupervisorActive && (
               <span title="Acesso restrito à supervisão">
                 <Lock className="w-3 h-3 text-red-300 opacity-90" />

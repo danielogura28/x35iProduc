@@ -5,30 +5,89 @@ import {
   ProductionRecord, 
   FactoryMonthlyGoals, 
   Operator, 
-  ShiftLeader 
+  ShiftLeader,
+  MachineId,
+  GlobalLineStatuses,
+  LineOperationalStatus,
+  MACHINE_LIST
 } from '../types/production';
 
 const STORAGE_KEY = 'extrucontrol_records_v3';
 const GOALS_KEY = 'extrucontrol_goals_v3';
 const OPERATORS_KEY = 'extrucontrol_operators_v1';
 const LEADERS_KEY = 'extrucontrol_leaders_v1';
+const GLOBAL_LINE_STATUSES_KEY = 'extrucontrol_global_line_statuses_v1';
+
+export const DEFAULT_GLOBAL_LINE_STATUSES: GlobalLineStatuses = {
+  DR01: { status: 'em_producao', notes: 'Linha operando normalmente' },
+  DR02: { status: 'em_producao', notes: 'Linha operando normalmente' },
+  DR03: { status: 'setup', setupMaterial: 'PA6.6 com Fibra de Vidro 30% Natural', notes: 'Troca de matriz e tela' },
+  DR04: { status: 'em_producao', notes: 'Linha operando normalmente' },
+  DR05: { status: 'preventiva', notes: 'Preventiva mensal: lubrificação programada' },
+  DR06: { status: 'manutencao', maintenanceOrderNumber: 'OM-2026-8812', notes: 'Intervenção técnica no motor principal' }
+};
+
+export function getGlobalLineStatuses(): GlobalLineStatuses {
+  try {
+    const raw = localStorage.getItem(GLOBAL_LINE_STATUSES_KEY);
+    if (!raw) {
+      localStorage.setItem(GLOBAL_LINE_STATUSES_KEY, JSON.stringify(DEFAULT_GLOBAL_LINE_STATUSES));
+      return DEFAULT_GLOBAL_LINE_STATUSES;
+    }
+    const parsed = JSON.parse(raw);
+    // Ensure all machines are present
+    const result: GlobalLineStatuses = { ...DEFAULT_GLOBAL_LINE_STATUSES };
+    for (const m of MACHINE_LIST) {
+      if (parsed[m]) {
+        result[m] = parsed[m];
+      }
+    }
+    return result;
+  } catch {
+    return DEFAULT_GLOBAL_LINE_STATUSES;
+  }
+}
+
+export function saveGlobalLineStatuses(statuses: GlobalLineStatuses): void {
+  localStorage.setItem(GLOBAL_LINE_STATUSES_KEY, JSON.stringify(statuses));
+}
+
+export function setAllLinesStatusGlobally(status: LineOperationalStatus, updatedBy?: string): GlobalLineStatuses {
+  const current = getGlobalLineStatuses();
+  const updated: GlobalLineStatuses = { ...current };
+  const now = new Date().toISOString();
+  
+  for (const m of MACHINE_LIST) {
+    updated[m] = {
+      status,
+      updatedAt: now,
+      updatedBy: updatedBy || 'Operação',
+      notes: status === 'em_producao' ? 'Definido em produção global' : undefined,
+      maintenanceOrderNumber: status === 'manutencao' ? current[m].maintenanceOrderNumber : undefined,
+      setupMaterial: status === 'setup' ? current[m].setupMaterial : undefined
+    };
+  }
+  saveGlobalLineStatuses(updated);
+  return updated;
+}
+
 
 export const DEFAULT_GOALS: FactoryMonthlyGoals = {
-  targetAverageProductivityKgh: 430,
+  targetAverageProductivityKgh: 400,
   targetProcessSheetComplianceRate: 94,
   maxStoppageHoursPerMachine: 12,
   targetLabelComplianceRate: 98,
 };
 
 export const DEFAULT_OPERATORS: Operator[] = [
-  { id: 'op-1', name: 'Carlos Silveira' },
-  { id: 'op-2', name: 'Marcos Vinicius' },
-  { id: 'op-3', name: 'Roberto Almeida' },
-  { id: 'op-4', name: 'Lucas Fernandes' },
-  { id: 'op-5', name: 'Gilmar Santos' },
-  { id: 'op-6', name: 'Diego Ramos' },
-  { id: 'op-7', name: 'Rodrigo Mello' },
-  { id: 'op-8', name: 'Anderson Silva' }
+  { id: 'op-1', name: 'Lucas Fernandes' },
+  { id: 'op-2', name: 'Carlos Silveira' },
+  { id: 'op-3', name: 'Marcos Vinicius' },
+  { id: 'op-4', name: 'Daniel' },
+  { id: 'op-5', name: 'Antônio' },
+  { id: 'op-6', name: 'Roberto Almeida' },
+  { id: 'op-7', name: 'Gilmar Santos' },
+  { id: 'op-8', name: 'Diego Ramos' }
 ];
 
 export const DEFAULT_LEADERS: ShiftLeader[] = [
@@ -75,15 +134,44 @@ export function saveShiftLeaders(leaders: ShiftLeader[]): void {
 }
 
 const SAMPLE_RECORDS: ProductionRecord[] = [
+  // DR01 - Apontamento 1 (Inativa/Parada por Ajuste de Processo)
   {
-    id: 'rec-101',
-    timestamp: '2026-10-27T07:30:00.000Z',
+    id: 'rec-101a',
+    timestamp: '2026-10-27T13:30:00.000Z',
+    machineId: 'DR01',
+    shift: 'Turno 1 (06h - 14h)',
+    operatorName: 'Carlos Silveira',
+    shiftLeader: 'Fernando Rocha',
+    lineStatus: 'inativa',
+    productionOrder: '',
+    batchNumber: '',
+    productName: 'PP Carga Mineral 30% Preto',
+    productivityKgh: 0,
+    targetProductivityKgh: 450,
+    rpm: 0,
+    motorAmperes: 0,
+    hasPreviousReferenceSheet: true,
+    temperaturesConforming: true,
+    parametersMatchPreviousSheet: true,
+    hasStoppage: true,
+    stoppageQuantity: 1,
+    stoppageReason: 'Ajuste de Processo',
+    stoppageReasonsList: ['Ajuste de Processo'],
+    stoppageMinutes: 0,
+    hasMaintenanceOrder: false,
+    operationalDeviationsNotes: 'Parada programada para ajuste de processo',
+    photos: []
+  },
+  // DR01 - Apontamento 2 (Em Produção - 462 kg/h)
+  {
+    id: 'rec-101b',
+    timestamp: '2026-10-27T08:00:00.000Z',
     machineId: 'DR01',
     shift: 'Turno 1 (06h - 14h)',
     operatorName: 'Carlos Silveira',
     shiftLeader: 'Fernando Rocha',
     lineStatus: 'em_producao',
-    productionOrder: 'OP-48201',
+    productionOrder: '',
     batchNumber: 'LT-2710-01',
     productName: 'PP Carga Mineral 30% Preto',
     productivityKgh: 462,
@@ -91,24 +179,18 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     rpm: 385,
     motorAmperes: 72.4,
     hasPreviousReferenceSheet: true,
-    prevProductivityKgh: 458,
+    prevProductivityKgh: 450,
     prevRpm: 380,
-    prevMotorAmperes: 71.5,
+    prevMotorAmperes: 71.0,
     temperaturesConforming: true,
     parametersMatchPreviousSheet: true,
-    dopObservationsIdentified: false,
-    deviationApprovedByLeader: false,
     dosers: {
-      dos01: { checked: true, value: '70% Resina PP', conforming: true },
-      dos02: { checked: true, value: '25% Talco Mineral', conforming: true },
-      dos03: { checked: true, value: '3% Negro de Fumo', conforming: true },
-      dos04: { checked: true, value: '2% Antioxidante', conforming: true }
+      dos01: { checked: true, value: '70% PP', conforming: true },
+      dos02: { checked: true, value: '25% Carga', conforming: true },
+      dos03: { checked: true, value: '3% Negro', conforming: true },
+      dos04: { checked: true, value: '2% Aditivo', conforming: true }
     },
     dos02Homogenization: 'conforme',
-    hasSideFeeder: true,
-    sideFeederCurrentRpm: 280,
-    sideFeederPreviousRpm: 280,
-    sideFeederConforming: true,
     circulationSystemStatus: 'ativo',
     magnetStatus: 'limpo',
     sievePowderCondition: 'normal',
@@ -121,19 +203,20 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     hasMaintenanceOrder: false,
     photos: []
   },
+  // DR02 - Apontamento 1 (Marcos Vinicius - 395 kg/h - OP-14756)
   {
-    id: 'rec-102',
-    timestamp: '2026-10-27T07:15:00.000Z',
+    id: 'rec-102a',
+    timestamp: '2026-10-27T09:30:00.000Z',
     machineId: 'DR02',
     shift: 'Turno 1 (06h - 14h)',
     operatorName: 'Marcos Vinicius',
     shiftLeader: 'Fernando Rocha',
     lineStatus: 'em_producao',
-    productionOrder: 'OP-48205',
+    productionOrder: 'OP-14756',
     batchNumber: 'LT-2710-02',
     productName: 'PEAD Composto Rígido Cinza',
     productivityKgh: 395,
-    targetProductivityKgh: 420,
+    targetProductivityKgh: 410,
     rpm: 340,
     motorAmperes: 66.8,
     hasPreviousReferenceSheet: true,
@@ -141,23 +224,13 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     prevRpm: 360,
     prevMotorAmperes: 69.0,
     temperaturesConforming: false,
-    temperatureDeviationZones: 'Zona 4 (+14°C acima do setpoint) e Zona 5',
+    temperatureDeviationZones: 'Zona 4 (+14°C) e Zona 5',
     parametersMatchPreviousSheet: false,
     parameterDeviationReason: 'Redução de RPM para conter cisalhamento na troca de lote',
     dopObservationsIdentified: true,
-    dopObservationsDetails: 'Anotado no DOP pg 42: ajuste térmico pós-troca de resina',
+    dopObservationsDetails: 'Ajuste térmico pós-troca de resina',
     deviationApprovedByLeader: true,
     approvingLeaderName: 'Fernando Rocha',
-    dosers: {
-      dos01: { checked: true, value: '80% PEAD', conforming: true },
-      dos02: { checked: true, value: '18% Carga', conforming: false, notes: 'Alimentação levemente irregular' },
-      dos03: { checked: true, value: '2% Master Cinza', conforming: true },
-      dos04: { checked: false, value: '', conforming: true }
-    },
-    dos02Homogenization: 'irregular',
-    dos02HomogenizationNotes: 'Pequena aglomeração na rosca de dosagem, realizada limpeza rápida.',
-    hasSideFeeder: false,
-    circulationSystemStatus: 'ativo',
     magnetStatus: 'limpeza_realizada',
     sievePowderCondition: 'normal',
     sealerTempConforming: true,
@@ -167,12 +240,39 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     deviationReportedToLeader: true,
     deviationReportTime: '06:50',
     deviationReportLeaderName: 'Fernando Rocha',
-    deviationReportLeaderNotes: 'Líder autorizou prosseguir com monitoramento a cada 30 min.',
     hasStoppage: false,
     stoppageQuantity: 0,
     hasMaintenanceOrder: false,
     photos: []
   },
+  // DR02 - Apontamento 2 (Daniel - 360 kg/h - OP-14756 - Turno 2)
+  {
+    id: 'rec-102b',
+    timestamp: '2026-10-27T16:00:00.000Z',
+    machineId: 'DR02',
+    shift: 'Turno 2 (14h - 22h)',
+    operatorName: 'Daniel',
+    shiftLeader: 'Amanda Dias',
+    lineStatus: 'em_producao',
+    productionOrder: 'OP-14756',
+    batchNumber: 'LT-2710-02B',
+    productName: 'PEAD Composto Rígido Cinza',
+    productivityKgh: 360,
+    targetProductivityKgh: 410,
+    rpm: 330,
+    motorAmperes: 65.0,
+    hasPreviousReferenceSheet: true,
+    temperaturesConforming: true,
+    parametersMatchPreviousSheet: true,
+    sealerTempConforming: true,
+    labelCodesConforming: true,
+    sealingQuality: 'conforme',
+    hasStoppage: false,
+    stoppageQuantity: 0,
+    hasMaintenanceOrder: false,
+    photos: []
+  },
+  // DR03 - Apontamento (Roberto Almeida - Em Setup - PA6.6)
   {
     id: 'rec-103',
     timestamp: '2026-10-27T07:00:00.000Z',
@@ -181,10 +281,25 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     operatorName: 'Roberto Almeida',
     shiftLeader: 'Fernando Rocha',
     lineStatus: 'setup',
-    setupMaterial: 'PA6.6 com Fibra de Vidro 30% Natural (Troca de Matriz e Tela 100 mesh)',
-    operationalDeviationsNotes: 'Limpeza de canhão e pré-aquecimento da matriz para nova resina de engenharia.',
+    setupMaterial: 'PA6.6 com Fibra de Vidro 30% Natural',
+    productionOrder: '',
+    batchNumber: '',
+    productName: '',
+    productivityKgh: 0,
+    targetProductivityKgh: 440,
+    rpm: 0,
+    motorAmperes: 0,
+    hasPreviousReferenceSheet: false,
+    temperaturesConforming: false,
+    parametersMatchPreviousSheet: false,
+    hasStoppage: false,
+    stoppageQuantity: 0,
+    stoppageMinutes: 90,
+    hasMaintenanceOrder: false,
+    operationalDeviationsNotes: 'Limpeza de canhão e pré-aquecimento da matriz para nova resina.',
     photos: []
   },
+  // DR04 - Apontamento (Lucas Fernandes - 480 kg/h - OP-48212)
   {
     id: 'rec-104',
     timestamp: '2026-10-27T06:40:00.000Z',
@@ -230,10 +345,20 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     timestamp: '2026-10-27T06:30:00.000Z',
     machineId: 'DR05',
     shift: 'Turno 1 (06h - 14h)',
-    operatorName: 'Gilmar Santos',
+    operatorName: 'Antônio',
     shiftLeader: 'Fernando Rocha',
     lineStatus: 'preventiva',
-    operationalDeviationsNotes: 'Preventiva mensal: lubrificação de mancais e reaperto elétrico programado.',
+    productivityKgh: 0,
+    targetProductivityKgh: 440,
+    rpm: 0,
+    motorAmperes: 0,
+    hasPreviousReferenceSheet: false,
+    temperaturesConforming: false,
+    parametersMatchPreviousSheet: false,
+    hasStoppage: true,
+    stoppageMinutes: 60,
+    stoppageQuantity: 0,
+    operationalDeviationsNotes: 'Preventiva mensal: lubrificação programada e reaperto elétrico.',
     photos: []
   },
   {
@@ -241,11 +366,22 @@ const SAMPLE_RECORDS: ProductionRecord[] = [
     timestamp: '2026-10-27T06:15:00.000Z',
     machineId: 'DR06',
     shift: 'Turno 1 (06h - 14h)',
-    operatorName: 'Diego Ramos',
+    operatorName: 'Roberto Almeida',
     shiftLeader: 'Fernando Rocha',
     lineStatus: 'manutencao',
     maintenanceOrderNumber: 'OM-2026-8812',
-    operationalDeviationsNotes: 'Falha de acionamento do motor principal. Equipe de elétrica atendendo com a OM-2026-8812.',
+    hasMaintenanceOrder: true,
+    productivityKgh: 0,
+    targetProductivityKgh: 440,
+    rpm: 0,
+    motorAmperes: 0,
+    hasPreviousReferenceSheet: false,
+    temperaturesConforming: false,
+    parametersMatchPreviousSheet: false,
+    hasStoppage: true,
+    stoppageMinutes: 60,
+    stoppageQuantity: 0,
+    operationalDeviationsNotes: 'Falha de acionamento do motor principal. Atendimento com a OM-2026-8812.',
     photos: []
   }
 ];
