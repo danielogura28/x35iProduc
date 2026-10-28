@@ -1084,11 +1084,29 @@ export function exportDailyReportToExcel(
  */
 export function exportPowerBIVisualExcel(
   records: ProductionRecord[],
-  periodLabel: string, // 'YYYY-MM' ou 'YYYY-MM-DD'
+  periodLabel: string, // 'YYYY-MM', 'YYYY-MM-DD', 'Semana 44', etc.
   factoryGoals: FactoryMonthlyGoals,
-  isDaily: boolean = false
+  isDaily: boolean = false,
+  options?: {
+    startDate?: string;
+    endDate?: string;
+    customFilteredRecords?: ProductionRecord[];
+    periodTitle?: string;
+  }
 ): void {
-  const filtered = records.filter(r => r.timestamp.startsWith(periodLabel));
+  let filtered: ProductionRecord[];
+  if (options?.customFilteredRecords) {
+    filtered = options.customFilteredRecords;
+  } else if (options?.startDate && options?.endDate) {
+    filtered = records.filter(r => {
+      const d = r.timestamp.slice(0, 10);
+      return d >= options.startDate! && d <= options.endDate!;
+    });
+  } else {
+    filtered = records.filter(r => r.timestamp.startsWith(periodLabel));
+  }
+
+  const displayPeriodLabel = options?.periodTitle || periodLabel;
 
   // Cálculos consolidados
   const prodRecords = filtered.filter(r => (r.lineStatus || 'em_producao') === 'em_producao');
@@ -1254,7 +1272,7 @@ export function exportPowerBIVisualExcel(
             <font color="#94a3b8" size="2">Consolidação visual dos KPIs de vazão, conformidade técnica de ficha, matriz de frotas e ranking de operadores.</font>
             <div style="margin-top:10px; padding-top:8px; border-top:1px solid #1e293b;">
               <font color="#cbd5e1" size="2">
-                <b>Slicers Ativos:</b> Período: <font color="#fbbf24"><b>${periodLabel}</b></font> &nbsp;|&nbsp;
+                <b>Slicers Ativos:</b> Período: <font color="#fbbf24"><b>${displayPeriodLabel}</b></font> &nbsp;|&nbsp;
                 Frota: <b>Extrusoras DR01 a DR06 (100% Monitorada)</b> &nbsp;|&nbsp;
                 Apontamentos: <b>${filtered.length} registros</b> &nbsp;|&nbsp;
                 Emissão: <b>${new Date().toLocaleString('pt-BR')}</b>

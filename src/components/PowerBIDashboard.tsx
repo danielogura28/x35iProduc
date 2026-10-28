@@ -27,13 +27,23 @@ import {
   Users,
   ShieldAlert,
   ChevronDown,
-  Download
+  Download,
+  CalendarRange,
+  ChevronRight,
+  Filter
 } from 'lucide-react';
 import { 
   exportMonthlyReportToExcel, 
   exportDailyReportToExcel,
   exportPowerBIVisualExcel 
 } from '../utils/excelExport';
+import {
+  getWeekString,
+  getWeekDateRange,
+  getRecentWeeks,
+  formatDateBR,
+  isTimestampInRange
+} from '../utils/dateUtils';
 
 interface PowerBIDashboardProps {
   records: ProductionRecord[];
@@ -46,30 +56,104 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
   factoryGoals,
   onRequestPinAuth
 }) => {
-  const [periodType, setPeriodType] = useState<'day' | 'month'>('month');
+  // Tipos de período: Diário, Semanal (ISO), Mensal ou Intervalo Personalizado
+  const [periodType, setPeriodType] = useState<'day' | 'week' | 'month' | 'custom'>('week');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
+  
   const [selectedDay, setSelectedDay] = useState<string>(() => {
     if (records.length > 0) {
       const sorted = [...records].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       return sorted[0].timestamp.slice(0, 10);
     }
-    return new Date().toISOString().slice(0, 10);
+    return '2026-10-28';
   });
+
+  const [selectedWeek, setSelectedWeek] = useState<string>(() => {
+    if (records.length > 0) {
+      const sorted = [...records].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      return getWeekString(new Date(sorted[0].timestamp));
+    }
+    return '2026-W44';
+  });
+
+  const [customStartDate, setCustomStartDate] = useState<string>('2026-10-01');
+  const [customEndDate, setCustomEndDate] = useState<string>('2026-10-31');
   const [selectedMachineFilter, setSelectedMachineFilter] = useState<string>('ALL');
 
-  // Filtragem dos registros
+  // Lista de semanas recentes calculadas a partir da data de referência
+  const recentWeeks = useMemo(() => {
+    const baseDate = selectedDay ? new Date(`${selectedDay}T12:00:00Z`) : new Date('2026-10-28T12:00:00Z');
+    return getRecentWeeks(10, baseDate);
+  }, [selectedDay]);
+
+  // Metadados do período ativo para cabeçalhos e relatórios
+  const activePeriodInfo = useMemo(() => {
+    if (periodType === 'day') {
+      return {
+        type: 'day' as const,
+        title: `Relatório Diário • ${formatDateBR(selectedDay)}`,
+        shortLabel: formatDateBR(selectedDay),
+        startDate: selectedDay,
+        endDate: selectedDay,
+        tag: `Dia: ${formatDateBR(selectedDay)}`
+      };
+    } else if (periodType === 'week') {
+      const range = getWeekDateRange(selectedWeek);
+      return {
+        type: 'week' as const,
+        title: `Relatório Semanal • ${range.label}`,
+        shortLabel: `Semana ${range.weekNum}/${range.year}`,
+        startDate: range.start,
+        endDate: range.end,
+        tag: range.label
+      };
+    } else if (periodType === 'custom') {
+      return {
+        type: 'custom' as const,
+        title: `Período Personalizado (${formatDateBR(customStartDate)} a ${formatDateBR(customEndDate)})`,
+        shortLabel: `${formatDateBR(customStartDate)} a ${formatDateBR(customEndDate)}`,
+        startDate: customStartDate,
+        endDate: customEndDate,
+        tag: `${formatDateBR(customStartDate)} a ${formatDateBR(customEndDate)}`
+      };
+    } else {
+      const [y, m] = selectedMonth.split('-');
+      const monthNames = [
+        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      ];
+      const mName = monthNames[parseInt(m, 10) - 1] || m;
+      const daysInM = new Date(parseInt(y, 10), parseInt(m, 10), 0).getDate();
+      return {
+        type: 'month' as const,
+        title: `Relatório Mensal • ${mName} de ${y}`,
+        shortLabel: `${mName}/${y}`,
+        startDate: `${selectedMonth}-01`,
+        endDate: `${selectedMonth}-${daysInM.toString().padStart(2, '0')}`,
+        tag: `Mês: ${mName}/${y}`
+      };
+    }
+  }, [periodType, selectedDay, selectedWeek, selectedMonth, customStartDate, customEndDate]);
+
+  // Filtragem dos registros com suporte a dia, semana ISO, mês e intervalo personalizado
   const filteredRecords = useMemo(() => {
     let result = records;
     if (periodType === 'day') {
       result = result.filter(r => r.timestamp.startsWith(selectedDay));
+    } else if (periodType === 'week') {
+      const range = getWeekDateRange(selectedWeek);
+      result = result.filter(r => isTimestampInRange(r.timestamp, range.start, range.end));
+    } else if (periodType === 'custom') {
+      result = result.filter(r => isTimestampInRange(r.timestamp, customStartDate, customEndDate));
     } else {
       result = result.filter(r => r.timestamp.startsWith(selectedMonth));
     }
+
     if (selectedMachineFilter !== 'ALL') {
       result = result.filter(r => r.machineId === selectedMachineFilter);
     }
     return result;
-  }, [records, periodType, selectedDay, selectedMonth, selectedMachineFilter]);
+  }, [records, periodType, selectedDay, selectedWeek, selectedMonth, customStartDate, customEndDate, selectedMachineFilter]);
 
   // 1. TOP 4 CARDS ESCUROS COM GLOW (Screenshot 4)
   const kpis = useMemo(() => {
@@ -397,8 +481,18 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
   // Handlers de Exportação
   const handleExportVisualExcel = () => {
     const doExport = () => {
-      const periodLabel = periodType === 'day' ? selectedDay : selectedMonth;
-      exportPowerBIVisualExcel(records, periodLabel, factoryGoals, periodType === 'day');
+      exportPowerBIVisualExcel(
+        records, 
+        activePeriodInfo.shortLabel, 
+        factoryGoals, 
+        periodType === 'day',
+        {
+          startDate: activePeriodInfo.startDate,
+          endDate: activePeriodInfo.endDate,
+          customFilteredRecords: filteredRecords,
+          periodTitle: activePeriodInfo.title
+        }
+      );
     };
 
     if (onRequestPinAuth) {
@@ -428,8 +522,58 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
     window.print();
   };
 
+  // Funções de atalho rápido de datas/semanas
+  const setQuickToday = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    setSelectedDay(today);
+  };
+
+  const setQuickYesterday = () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    setSelectedDay(yesterday.toISOString().slice(0, 10));
+  };
+
+  const setQuickThisWeek = () => {
+    setSelectedWeek(getWeekString(new Date()));
+  };
+
+  const setQuickLastWeek = () => {
+    const lastWeek = new Date();
+    lastWeek.setDate(lastWeek.getDate() - 7);
+    setSelectedWeek(getWeekString(lastWeek));
+  };
+
   return (
     <div className="space-y-6 pb-12">
+      {/* CABEÇALHO EXCLUSIVO PARA IMPRESSÃO / SALVAMENTO EM PDF */}
+      <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-6">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-lg bg-red-950 text-white font-black flex items-center justify-center text-lg border border-red-900">
+              PP
+            </div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-widest text-red-900 font-mono">
+                PETROPOL POLÍMEROS INDUSTRIAIS LTDA. • CONTROLE DE OPERAÇÕES DE EXTRUSÃO
+              </div>
+              <h1 className="text-xl font-black text-slate-950 tracking-tight">
+                RELATÓRIO GERENCIAL DE DESEMPENHO E PRODUTIVIDADE OPERACIONAL
+              </h1>
+              <p className="text-xs text-slate-700 font-semibold mt-0.5">
+                Período de Análise: <span className="text-red-900 font-bold">{activePeriodInfo.title}</span> (Intervalo: {formatDateBR(activePeriodInfo.startDate)} a {formatDateBR(activePeriodInfo.endDate)})
+              </p>
+            </div>
+          </div>
+          <div className="text-right text-[10px] text-slate-600 font-mono space-y-0.5">
+            <div>Emissão: <strong>{new Date().toLocaleString('pt-BR')}</strong></div>
+            <div>Filtro de Extrusoras: <strong>{selectedMachineFilter === 'ALL' ? 'Frota Total (DR01 a DR06)' : `Extrusora ${selectedMachineFilter}`}</strong></div>
+            <div>Apontamentos no Período: <strong>{filteredRecords.length}</strong></div>
+            <div className="text-emerald-700 font-bold">Documento Auditado para Gestão Industrial</div>
+          </div>
+        </div>
+      </div>
+
       {/* Power BI Executive Ribbon & Slicers Bar */}
       <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-red-950 rounded-2xl p-6 text-white shadow-xl border border-slate-800 print:hidden">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
@@ -447,13 +591,13 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               ExtruControl BI · Dashboard Executivo de Performance
             </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Visão consolidada idêntica aos painéis de gestão: vazão real vs meta, operadores, paradas e ocorrências.
+              Visão consolidada idêntica aos painéis de gestão: escolha a data, selecione semanas para impressão e exportação.
             </p>
           </div>
 
           {/* Action Buttons & Slicers */}
-          <div className="flex flex-wrap items-center gap-2.5 bg-slate-900/90 p-2 rounded-xl border border-slate-700/80 backdrop-blur-xs">
-            {/* Slicer: Diário vs Mensal */}
+          <div className="flex flex-wrap items-center gap-2.5 bg-slate-900/90 p-2.5 rounded-xl border border-slate-700/80 backdrop-blur-xs">
+            {/* Slicer: Período Segmentado (Diário | Semanal | Mensal | Personalizado) */}
             <div className="flex rounded-lg bg-slate-800 p-0.5 border border-slate-700 text-xs">
               <button
                 type="button"
@@ -466,6 +610,15 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => setPeriodType('week')}
+                className={`px-3 py-1.5 rounded-md font-bold transition-all cursor-pointer ${
+                  periodType === 'week' ? 'bg-red-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Semanal
+              </button>
+              <button
+                type="button"
                 onClick={() => setPeriodType('month')}
                 className={`px-3 py-1.5 rounded-md font-bold transition-all cursor-pointer ${
                   periodType === 'month' ? 'bg-red-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
@@ -473,26 +626,119 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               >
                 Mensal
               </button>
+              <button
+                type="button"
+                onClick={() => setPeriodType('custom')}
+                className={`px-3 py-1.5 rounded-md font-bold transition-all cursor-pointer ${
+                  periodType === 'custom' ? 'bg-red-700 text-white shadow-xs' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Período
+              </button>
             </div>
 
-            {/* Date / Month Picker */}
-            {periodType === 'day' ? (
-              <input
-                type="date"
-                value={selectedDay}
-                onChange={(e) => setSelectedDay(e.target.value)}
-                className="bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500"
-              />
-            ) : (
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500"
-              />
+            {/* SELETORES DINÂMICOS POR TIPO DE PERÍODO */}
+            {periodType === 'day' && (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={selectedDay}
+                  onChange={(e) => setSelectedDay(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500"
+                />
+                <button
+                  type="button"
+                  onClick={setQuickToday}
+                  className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2 py-1.5 rounded border border-slate-700 cursor-pointer"
+                  title="Selecionar Hoje"
+                >
+                  Hoje
+                </button>
+                <button
+                  type="button"
+                  onClick={setQuickYesterday}
+                  className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2 py-1.5 rounded border border-slate-700 cursor-pointer"
+                  title="Selecionar Ontem"
+                >
+                  Ontem
+                </button>
+              </div>
             )}
 
-            {/* Machine Filter */}
+            {periodType === 'week' && (
+              <div className="flex items-center gap-1.5">
+                {/* Dropdown com Semanas Formatadas */}
+                <select
+                  value={selectedWeek}
+                  onChange={(e) => setSelectedWeek(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500 max-w-[210px]"
+                >
+                  {recentWeeks.map(w => (
+                    <option key={w.value} value={w.value}>
+                      {w.label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Seletor nativo de semana ISO */}
+                <input
+                  type="week"
+                  value={selectedWeek}
+                  onChange={(e) => setSelectedWeek(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-2 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500 hidden sm:inline-block"
+                  title="Selecionar qualquer semana do ano"
+                />
+
+                <button
+                  type="button"
+                  onClick={setQuickThisWeek}
+                  className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2 py-1.5 rounded border border-slate-700 cursor-pointer"
+                  title="Ir para a Semana Atual"
+                >
+                  Atual
+                </button>
+                <button
+                  type="button"
+                  onClick={setQuickLastWeek}
+                  className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-2 py-1.5 rounded border border-slate-700 cursor-pointer"
+                  title="Ir para a Semana Anterior"
+                >
+                  Anterior
+                </button>
+              </div>
+            )}
+
+            {periodType === 'month' && (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500"
+                />
+              </div>
+            )}
+
+            {periodType === 'custom' && (
+              <div className="flex items-center gap-1.5 text-xs text-slate-300">
+                <span className="text-[11px] text-slate-400">De:</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-2 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500"
+                />
+                <span className="text-[11px] text-slate-400">Até:</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="bg-slate-800 text-white text-xs px-2 py-1.5 rounded-lg border border-slate-700 font-mono font-semibold focus:outline-hidden focus:border-red-500"
+                />
+              </div>
+            )}
+
+            {/* Filtro de Linha / Extrusora */}
             <select
               value={selectedMachineFilter}
               onChange={(e) => setSelectedMachineFilter(e.target.value)}
@@ -504,10 +750,20 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               ))}
             </select>
 
-            {/* Main Export Button: Excel Visual Power BI */}
+            {/* BOTÃO PRINCIPAL DE IMPRESSÃO / SALVAR EM PDF */}
+            <button
+              onClick={handlePrint}
+              className="px-3.5 py-2 text-xs font-bold text-white bg-red-700 hover:bg-red-600 active:bg-red-800 rounded-lg shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Imprimir relatório gerencial formatado ou salvar como PDF no navegador"
+            >
+              <Printer className="w-4 h-4 text-white" />
+              <span>Imprimir Relatório</span>
+            </button>
+
+            {/* BOTÃO EXCEL VISUAL POWER BI */}
             <button
               onClick={handleExportVisualExcel}
-              className="px-4 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 rounded-lg shadow-md flex items-center gap-1.5 transition-all cursor-pointer font-sans"
+              className="px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:from-amber-300 hover:to-amber-200 rounded-lg shadow-md flex items-center gap-1.5 transition-all cursor-pointer font-sans"
               title="Baixar planilha Excel com o layout e cards VISUAIS IDÊNTICOS ao Power BI (.xls)"
             >
               <FileSpreadsheet className="w-4 h-4 text-slate-900" />
@@ -515,7 +771,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               <Lock className="w-3 h-3 text-slate-800" />
             </button>
 
-            {/* Structured XLSX Button */}
+            {/* BOTÃO XLSX BASE */}
             <button
               onClick={handleExportStructuredXLSX}
               className="px-3 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
@@ -524,32 +780,26 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               <Download className="w-3.5 h-3.5 text-slate-300" />
               <span>XLSX Base</span>
             </button>
-
-            {/* Print Button */}
-            <button
-              onClick={handlePrint}
-              className="p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition-colors cursor-pointer"
-              title="Imprimir / Salvar PDF do Painel"
-            >
-              <Printer className="w-4 h-4" />
-            </button>
           </div>
         </div>
 
-        {/* Active Slicers Tag Strip */}
+        {/* Faixa com as tags dos Slicers Ativos */}
         <div className="mt-4 pt-3 border-t border-slate-800 flex flex-wrap items-center gap-3 text-[11px] text-slate-400 font-mono">
           <span className="text-amber-400 font-semibold flex items-center gap-1">
             <Zap className="w-3 h-3" />
             Slicers Ativos:
           </span>
+          <span className="bg-slate-800/90 px-2 py-0.5 rounded border border-slate-700 text-white">
+            Período: <strong className="text-amber-300">{activePeriodInfo.title}</strong>
+          </span>
           <span className="bg-slate-800/90 px-2 py-0.5 rounded border border-slate-700">
-            Período: <strong>{periodType === 'day' ? selectedDay : selectedMonth}</strong>
+            Datas: <strong>{formatDateBR(activePeriodInfo.startDate)} até {formatDateBR(activePeriodInfo.endDate)}</strong>
           </span>
           <span className="bg-slate-800/90 px-2 py-0.5 rounded border border-slate-700">
             Filtro de Linha: <strong>{selectedMachineFilter === 'ALL' ? 'DR01 a DR06 (Frota Completa)' : selectedMachineFilter}</strong>
           </span>
           <span className="bg-slate-800/90 px-2 py-0.5 rounded border border-slate-700">
-            Apontamentos no Período: <strong>{filteredRecords.length}</strong>
+            Apontamentos Analisados: <strong className="text-emerald-400">{filteredRecords.length}</strong>
           </span>
         </div>
       </div>
@@ -1080,6 +1330,30 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* BLOCO DE ASSINATURAS E AVALIAÇÃO INDUSTRIAL PARA IMPRESSÃO / AUDITORIA */}
+      <div className="hidden print:block pt-8 mt-6 border-t-2 border-slate-300">
+        <div className="text-[10px] uppercase font-bold text-slate-500 mb-6 font-mono text-center">
+          Homologação e Auditoria de Desempenho Operacional de Extrusão • PetroPol Polímeros Industriais
+        </div>
+        <div className="grid grid-cols-3 gap-8 text-xs text-slate-800">
+          <div className="text-center pt-8 border-t border-slate-400">
+            <div className="font-bold uppercase text-[11px] text-slate-900">Operador Líder de Turno</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Responsável pelo Preenchimento e Lançamentos</div>
+            <div className="mt-4 text-[9px] text-slate-400 font-mono">Assinatura / Visto: _______________________</div>
+          </div>
+          <div className="text-center pt-8 border-t border-slate-400">
+            <div className="font-bold uppercase text-[11px] text-slate-900">Supervisão de Produção</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Engenharia de Processos & Produtividade</div>
+            <div className="mt-4 text-[9px] text-slate-400 font-mono">Assinatura / Visto: _______________________</div>
+          </div>
+          <div className="text-center pt-8 border-t border-slate-400">
+            <div className="font-bold uppercase text-[11px] text-slate-900">Garantia da Qualidade</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">Conformidade de Ficha de Processo e Embalagem</div>
+            <div className="mt-4 text-[9px] text-slate-400 font-mono">Assinatura / Visto: _______________________</div>
           </div>
         </div>
       </div>

@@ -27,6 +27,7 @@ import { exportToCSV } from '../utils/storage';
 import { exportMonthlyReportToExcel } from '../utils/excelExport';
 import { DailyReport } from './DailyReport';
 import { PowerBIDashboard } from './PowerBIDashboard';
+import { getMonthWeeks, isTimestampInRange } from '../utils/dateUtils';
 
 interface MonthlyReportProps {
   records: ProductionRecord[];
@@ -43,12 +44,25 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
 }) => {
   const [reportView, setReportView] = useState<'powerbi' | 'daily' | 'monthly'>('powerbi');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
+  const [selectedWeekFilter, setSelectedWeekFilter] = useState<string>('all');
   const [showGoalEditor, setShowGoalEditor] = useState<boolean>(false);
   const [editingGoals, setEditingGoals] = useState<FactoryMonthlyGoals>(factoryGoals);
 
+  const monthWeeks = useMemo(() => {
+    return getMonthWeeks(selectedMonth);
+  }, [selectedMonth]);
+
+  const activeWeek = useMemo(() => {
+    return monthWeeks.find(w => w.id === selectedWeekFilter) || monthWeeks[0];
+  }, [monthWeeks, selectedWeekFilter]);
+
   const monthRecords = useMemo(() => {
-    return records.filter(r => r.timestamp.startsWith(selectedMonth));
-  }, [records, selectedMonth]);
+    let list = records.filter(r => r.timestamp.startsWith(selectedMonth));
+    if (selectedWeekFilter !== 'all' && activeWeek) {
+      list = list.filter(r => isTimestampInRange(r.timestamp, activeWeek.start, activeWeek.end));
+    }
+    return list;
+  }, [records, selectedMonth, selectedWeekFilter, activeWeek]);
 
   const consolidatedMetrics = useMemo(() => {
     const totalRecords = monthRecords.length;
@@ -334,9 +348,27 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
             <input
               type="month"
               value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
+              onChange={(e) => {
+                setSelectedMonth(e.target.value);
+                setSelectedWeekFilter('all');
+              }}
               className="bg-slate-50 border border-slate-300 rounded-lg p-2 font-mono text-xs font-bold text-slate-800"
             />
+          </div>
+
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className="text-slate-500 font-medium">Semana:</span>
+            <select
+              value={selectedWeekFilter}
+              onChange={(e) => setSelectedWeekFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-300 rounded-lg p-2 font-mono text-xs font-bold text-slate-800"
+            >
+              {monthWeeks.map(w => (
+                <option key={w.id} value={w.id}>
+                  {w.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <button
