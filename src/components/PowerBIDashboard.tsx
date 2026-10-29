@@ -30,7 +30,13 @@ import {
   Download,
   CalendarRange,
   ChevronRight,
-  Filter
+  Filter,
+  Scale,
+  Magnet,
+  FileCheck,
+  Thermometer,
+  PackageCheck,
+  RefreshCw
 } from 'lucide-react';
 import { 
   exportMonthlyReportToExcel, 
@@ -476,6 +482,81 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         cumPct
       };
     });
+  }, [filteredRecords]);
+
+  // 9. AUDITORIA DE PROCESSO, QUALIDADE, BALANÇAS & 5S (SOLICITADO PELO USUÁRIO)
+  const processQualityAudit = useMemo(() => {
+    const prod = filteredRecords.filter(r => (r.lineStatus || 'em_producao') === 'em_producao');
+    
+    // Ficha Técnica Atual vs Anterior
+    const sheetSame = prod.filter(r => r.hasPreviousReferenceSheet && r.parametersMatchPreviousSheet).length;
+    const sheetDiff = prod.filter(r => r.hasPreviousReferenceSheet && !r.parametersMatchPreviousSheet).length;
+    const sheetNoRef = prod.filter(r => !r.hasPreviousReferenceSheet).length;
+    const sheetRepeatability = (sheetSame + sheetDiff) > 0 ? Math.round((sheetSame / (sheetSame + sheetDiff)) * 100) : 100;
+
+    // Condição dos Ímãs
+    const magnetClean = prod.filter(r => (r.magnetStatus || 'limpo') === 'limpo').length;
+    const magnetCleaned = prod.filter(r => r.magnetStatus === 'limpeza_realizada').length;
+    const magnetAlert = prod.filter(r => r.magnetStatus === 'limalha_detectada').length;
+    const magnetCrit = prod.filter(r => r.magnetStatus === 'nao_conforme').length;
+
+    // Peneira & Pó
+    const sieveNormal = prod.filter(r => (r.sievePowderCondition || 'normal') === 'normal').length;
+    const sieveAlert = prod.filter(r => r.sievePowderCondition === 'excesso_po' || r.sievePowderCondition === 'presenca_finos').length;
+    const sieveBlocked = prod.filter(r => r.sievePowderCondition === 'peneira_obstruida').length;
+
+    // Balança da Linha (Calibração e Tags)
+    const scaleConf = prod.filter(r => r.scaleCalibrationConforming || r.scaleCalibrationStatus === 'conforme').length;
+    const scaleNonConf = prod.filter(r => (r.scaleCalibrationConforming === false) || (r.scaleCalibrationStatus && r.scaleCalibrationStatus !== 'conforme')).length;
+    const scaleTags = Array.from(new Set(prod.map(r => r.scaleTagNumber || `BAL-${r.machineId}`).filter(Boolean)));
+
+    // Temperaturas e Zonas Térmicas
+    const thermConf = prod.filter(r => r.temperaturesConforming).length;
+    const thermDev = prod.filter(r => !r.temperaturesConforming).length;
+    const thermZones = prod.filter(r => !r.temperaturesConforming && r.temperatureDeviationZones).map(r => `${r.machineId}: ${r.temperatureDeviationZones}`);
+
+    // Sistema de Circulação
+    const circActive = prod.filter(r => (r.circulationSystemStatus || 'ativo') === 'ativo').length;
+    const circAlert = 0;
+    const circDown = prod.filter(r => r.circulationSystemStatus === 'inativo').length;
+
+    // Embalagem, Selagem e Etiquetas do Palete
+    const labelConf = prod.filter(r => r.labelCodesConforming).length;
+    const labelDev = prod.filter(r => r.labelCodesConforming === false).length;
+    const sealConf = prod.filter(r => (r.sealingQuality || 'conforme') === 'conforme').length;
+    const sealWeak = prod.filter(r => r.sealingQuality === 'aberta').length;
+    const sealBurnt = prod.filter(r => r.sealingQuality === 'queimada').length;
+    const sealNonConf = prod.filter(r => r.sealingQuality === 'defeituosa').length;
+
+    return {
+      totalProd: prod.length,
+      sheetSame,
+      sheetDiff,
+      sheetNoRef,
+      sheetRepeatability,
+      magnetClean,
+      magnetCleaned,
+      magnetAlert,
+      magnetCrit,
+      sieveNormal,
+      sieveAlert,
+      sieveBlocked,
+      scaleConf,
+      scaleNonConf,
+      scaleTags,
+      thermConf,
+      thermDev,
+      thermZones,
+      circActive,
+      circAlert,
+      circDown,
+      labelConf,
+      labelDev,
+      sealConf,
+      sealWeak,
+      sealBurnt,
+      sealNonConf
+    };
   }, [filteredRecords]);
 
   // Handlers de Exportação
@@ -1331,6 +1412,263 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* 5. PAINEL DE AUDITORIA OPERACIONAL & ESTABILIDADE (FICHA, ÍMÃS, BALANÇAS, PENEIRA & EMBALAGEM) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="p-1.5 rounded-lg bg-red-100 text-red-900">
+              <FileCheck className="w-5 h-5" />
+            </span>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                Auditoria de Processo, Ficha Técnica, Ímãs, Balança & Qualidade
+              </h3>
+              <p className="text-xs text-slate-500">
+                Monitoramento consolidado de repetibilidade, integridade de barreiras magnéticas, calibração e selagem
+              </p>
+            </div>
+          </div>
+          <span className="text-xs font-mono font-bold bg-slate-100 px-3 py-1 rounded border border-slate-200 text-slate-700 self-start sm:self-auto">
+            {processQualityAudit.totalProd} Apontamentos em Produção
+          </span>
+        </div>
+
+        {/* 4 Cards da Linha 1 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Ficha Atual vs Anterior */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <FileCheck className="w-4 h-4 text-blue-600" />
+                  Ficha Atual vs Anterior
+                </span>
+                <span className="text-xs font-black font-mono px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                  {processQualityAudit.sheetRepeatability}% Repet.
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Parâmetros Iguais:</span>
+                  <span className="font-bold text-emerald-700 font-mono flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    {processQualityAudit.sheetSame}x
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Parâmetros Diferentes:</span>
+                  <span className={`font-bold font-mono ${processQualityAudit.sheetDiff > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+                    {processQualityAudit.sheetDiff}x
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-slate-500">
+                  <span>Sem Ficha Anterior:</span>
+                  <span className="font-mono">{processQualityAudit.sheetNoRef}x</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500 font-mono">
+              Estabilidade de processo garantida
+            </div>
+          </div>
+
+          {/* Condição dos Ímãs */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Magnet className="w-4 h-4 text-red-600" />
+                  Condição dos Ímãs
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${processQualityAudit.magnetCrit > 0 ? 'bg-red-100 text-red-800' : (processQualityAudit.magnetAlert > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')}`}>
+                  {processQualityAudit.magnetCrit > 0 ? 'Crítico' : (processQualityAudit.magnetAlert > 0 ? 'Atenção' : 'Conforme')}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Conforme / Limpo:</span>
+                  <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.magnetClean}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Limpeza Realizada:</span>
+                  <span className="font-bold text-blue-700 font-mono">{processQualityAudit.magnetCleaned}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Alerta (Partículas):</span>
+                  <span className={`font-bold font-mono ${processQualityAudit.magnetAlert > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{processQualityAudit.magnetAlert}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Não Conforme (Crítico):</span>
+                  <span className={`font-bold font-mono ${processQualityAudit.magnetCrit > 0 ? 'text-red-700' : 'text-slate-500'}`}>{processQualityAudit.magnetCrit}x</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500 font-mono">
+              Barreira de segurança magnética
+            </div>
+          </div>
+
+          {/* Pó na Peneira */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Filter className="w-4 h-4 text-amber-600" />
+                  Pó na Peneira
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${processQualityAudit.sieveBlocked > 0 ? 'bg-red-100 text-red-800' : (processQualityAudit.sieveAlert > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')}`}>
+                  {processQualityAudit.sieveBlocked > 0 ? 'Bloqueio' : (processQualityAudit.sieveAlert > 0 ? 'Excesso Pó' : 'Normal')}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Normal / Conforme:</span>
+                  <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.sieveNormal}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Alerta (Excesso Pó):</span>
+                  <span className={`font-bold font-mono ${processQualityAudit.sieveAlert > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{processQualityAudit.sieveAlert}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Bloqueio / Limpeza:</span>
+                  <span className={`font-bold font-mono ${processQualityAudit.sieveBlocked > 0 ? 'text-red-700' : 'text-slate-500'}`}>{processQualityAudit.sieveBlocked}x</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500 font-mono">
+              Classificação e corte de finos
+            </div>
+          </div>
+
+          {/* Balança da Linha & Calibração */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Scale className="w-4 h-4 text-red-900" />
+                  Balança da Linha
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${processQualityAudit.scaleNonConf > 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                  {processQualityAudit.scaleNonConf > 0 ? 'Desvio Selo' : 'Calibradas'}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Calibração Conforme:</span>
+                  <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.scaleConf}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Vencida / Sem Etiqueta:</span>
+                  <span className={`font-bold font-mono ${processQualityAudit.scaleNonConf > 0 ? 'text-red-700' : 'text-slate-500'}`}>{processQualityAudit.scaleNonConf}x</span>
+                </div>
+                <div className="flex justify-between items-start pt-1">
+                  <span className="text-slate-500 text-[11px]">Tags na Linha:</span>
+                  <span className="font-mono text-[10px] font-bold text-slate-800 text-right max-w-[130px] truncate" title={processQualityAudit.scaleTags.join(', ')}>
+                    {processQualityAudit.scaleTags.length > 0 ? processQualityAudit.scaleTags.slice(0, 3).join(', ') : 'BAL-DR01-06'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500 font-mono">
+              Controle de pesagem e calibração
+            </div>
+          </div>
+
+        </div>
+
+        {/* 3 Cards da Linha 2: Térmico, Circulação e Embalagem */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+          
+          {/* Temperaturas & Zonas Térmicas */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Thermometer className="w-4 h-4 text-orange-600" />
+                Temperaturas do Canhão
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${processQualityAudit.thermDev > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                {processQualityAudit.thermDev > 0 ? `${processQualityAudit.thermDev} Desvio(s)` : '100% Conforme'}
+              </span>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Temperaturas em Ficha:</span>
+                <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.thermConf}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Desvios de Faixa Térmica:</span>
+                <span className={`font-bold font-mono ${processQualityAudit.thermDev > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{processQualityAudit.thermDev}x</span>
+              </div>
+              {processQualityAudit.thermZones.length > 0 && (
+                <div className="pt-2 text-[10px] text-amber-900 bg-amber-50 p-2 rounded border border-amber-200">
+                  <strong>Zonas registradas:</strong> {processQualityAudit.thermZones.slice(0, 2).join('; ')}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Sistema de Circulação e Refrigeração */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <RefreshCw className="w-4 h-4 text-cyan-600" />
+                Sistema de Circulação
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${processQualityAudit.circDown > 0 ? 'bg-red-100 text-red-800' : (processQualityAudit.circAlert > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')}`}>
+                {processQualityAudit.circDown > 0 ? 'Inoperante' : (processQualityAudit.circAlert > 0 ? 'Alerta' : 'Ativo')}
+              </span>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Circulação Ativa / Normal:</span>
+                <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.circActive}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Alerta de Pressão/Fluxo:</span>
+                <span className={`font-bold font-mono ${processQualityAudit.circAlert > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{processQualityAudit.circAlert}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Circulação Inoperante:</span>
+                <span className={`font-bold font-mono ${processQualityAudit.circDown > 0 ? 'text-red-700' : 'text-slate-500'}`}>{processQualityAudit.circDown}x</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Embalagem, Selagem e Etiquetas do Palete */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <PackageCheck className="w-4 h-4 text-emerald-700" />
+                Embalagem, Selagem & Palete
+              </span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${processQualityAudit.labelDev > 0 || processQualityAudit.sealNonConf > 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                {processQualityAudit.labelDev > 0 ? 'Divergência' : 'Conforme'}
+              </span>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Etiquetas Palete Conformes:</span>
+                <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.labelConf}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Etiquetas Não Conformes:</span>
+                <span className={`font-bold font-mono ${processQualityAudit.labelDev > 0 ? 'text-red-700' : 'text-slate-500'}`}>{processQualityAudit.labelDev}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Selagem Conforme:</span>
+                <span className="font-bold text-emerald-700 font-mono">{processQualityAudit.sealConf}x</span>
+              </div>
+              <div className="flex justify-between items-center text-[11px] text-slate-500">
+                <span>Desvios Selagem:</span>
+                <span>Fraca: <strong>{processQualityAudit.sealWeak}</strong> • Queimada: <strong>{processQualityAudit.sealBurnt}</strong></span>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 

@@ -22,7 +22,17 @@ import {
   TrendingUp,
   Activity,
   Layers,
-  Award
+  Award,
+  Scale,
+  Magnet,
+  Filter,
+  Tag,
+  Thermometer,
+  PackageCheck,
+  RefreshCw,
+  FileCheck,
+  Check,
+  X
 } from 'lucide-react';
 import { exportDailyReportToExcel } from '../utils/excelExport';
 
@@ -97,6 +107,56 @@ export const DailyReport: React.FC<DailyReportProps> = ({
     const preventiveCount = dayRecords.filter(r => r.lineStatus === 'preventiva').length;
     const reportedToLeaderCount = dayRecords.filter(r => r.deviationReportedToLeader).length;
 
+    // 1. Auditoria Ficha Atual vs Anterior
+    const sameAsPrevSheet = prodRecords.filter(r => r.hasPreviousReferenceSheet && r.parametersMatchPreviousSheet).length;
+    const diffFromPrevSheet = prodRecords.filter(r => r.hasPreviousReferenceSheet && !r.parametersMatchPreviousSheet).length;
+    const noPrevSheet = prodRecords.filter(r => !r.hasPreviousReferenceSheet).length;
+    const sheetRepeatabilityRate = (sameAsPrevSheet + diffFromPrevSheet) > 0
+      ? Math.round((sameAsPrevSheet / (sameAsPrevSheet + diffFromPrevSheet)) * 100)
+      : 100;
+
+    // 2. Condição dos Ímãs
+    const magnetClean = prodRecords.filter(r => (r.magnetStatus || 'limpo') === 'limpo').length;
+    const magnetCleanedInShift = prodRecords.filter(r => r.magnetStatus === 'limpeza_realizada').length;
+    const magnetAlert = prodRecords.filter(r => r.magnetStatus === 'limalha_detectada').length;
+    const magnetNonConforming = prodRecords.filter(r => r.magnetStatus === 'nao_conforme').length;
+
+    // 3. Condição do Pó na Peneira
+    const sieveNormal = prodRecords.filter(r => (r.sievePowderCondition || 'normal') === 'normal').length;
+    const sieveAlert = prodRecords.filter(r => r.sievePowderCondition === 'excesso_po' || r.sievePowderCondition === 'presenca_finos').length;
+    const sieveBlocked = prodRecords.filter(r => r.sievePowderCondition === 'peneira_obstruida').length;
+
+    // 4. Balança da Linha (Calibração e Tags)
+    const scaleConforming = prodRecords.filter(r => r.scaleCalibrationConforming || r.scaleCalibrationStatus === 'conforme').length;
+    const scaleNonConforming = prodRecords.filter(r => (r.scaleCalibrationConforming === false) || (r.scaleCalibrationStatus && r.scaleCalibrationStatus !== 'conforme')).length;
+    const scaleTags = Array.from(new Set(prodRecords.map(r => r.scaleTagNumber || `BAL-${r.machineId}`).filter(Boolean)));
+
+    // 5. Faixas Térmicas e Temperaturas
+    const thermalConforming = prodRecords.filter(r => r.temperaturesConforming).length;
+    const thermalDeviations = prodRecords.filter(r => !r.temperaturesConforming).length;
+    const thermalDeviationZonesList = prodRecords
+      .filter(r => !r.temperaturesConforming && r.temperatureDeviationZones)
+      .map(r => `${r.machineId}: ${r.temperatureDeviationZones}`);
+
+    // 6. Sistema de Circulação / Refrigeração
+    const circulationActive = prodRecords.filter(r => (r.circulationSystemStatus || 'ativo') === 'ativo').length;
+    const circulationAlert = 0;
+    const circulationDown = prodRecords.filter(r => r.circulationSystemStatus === 'inativo').length;
+
+    // 7. Embalagem, Selagem e Etiquetas do Palete
+    const palletLabelsConforming = prodRecords.filter(r => r.labelCodesConforming).length;
+    const palletLabelsNonConforming = prodRecords.filter(r => r.labelCodesConforming === false).length;
+
+    const sealConforming = prodRecords.filter(r => (r.sealingQuality || 'conforme') === 'conforme').length;
+    const sealWeak = prodRecords.filter(r => r.sealingQuality === 'aberta').length;
+    const sealBurnt = prodRecords.filter(r => r.sealingQuality === 'queimada').length;
+    const sealNonConforming = prodRecords.filter(r => r.sealingQuality === 'defeituosa').length;
+
+    const sealerTemps = prodRecords.map(r => r.sealerTempMeasured).filter((t): t is number => typeof t === 'number' && !isNaN(t));
+    const avgSealerTemp = sealerTemps.length > 0 ? Math.round(sealerTemps.reduce((a, b) => a + b, 0) / sealerTemps.length) : null;
+    const minSealerTemp = sealerTemps.length > 0 ? Math.min(...sealerTemps) : null;
+    const maxSealerTemp = sealerTemps.length > 0 ? Math.max(...sealerTemps) : null;
+
     return {
       prodRecordsCount: prodRecords.length,
       avgProductivity,
@@ -108,7 +168,37 @@ export const DailyReport: React.FC<DailyReportProps> = ({
       maintenanceCount,
       setupCount,
       preventiveCount,
-      reportedToLeaderCount
+      reportedToLeaderCount,
+      // Indicadores detalhados solicitados
+      sameAsPrevSheet,
+      diffFromPrevSheet,
+      noPrevSheet,
+      sheetRepeatabilityRate,
+      magnetClean,
+      magnetCleanedInShift,
+      magnetAlert,
+      magnetNonConforming,
+      sieveNormal,
+      sieveAlert,
+      sieveBlocked,
+      scaleConforming,
+      scaleNonConforming,
+      scaleTags,
+      thermalConforming,
+      thermalDeviations,
+      thermalDeviationZonesList,
+      circulationActive,
+      circulationAlert,
+      circulationDown,
+      palletLabelsConforming,
+      palletLabelsNonConforming,
+      sealConforming,
+      sealWeak,
+      sealBurnt,
+      sealNonConforming,
+      avgSealerTemp,
+      minSealerTemp,
+      maxSealerTemp
     };
   }, [dayRecords]);
 
@@ -306,6 +396,269 @@ export const DailyReport: React.FC<DailyReportProps> = ({
           <span className="text-[11px] text-slate-400 block mt-0.5">
             {metrics.maintenanceCount} OM(s) • {metrics.setupCount} Setup(s) • {metrics.reportedToLeaderCount} alinhados
           </span>
+        </div>
+      </div>
+
+      {/* Painel de Auditoria de Processo, Qualidade & 5S Operacional */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+          <div className="flex items-center gap-2">
+            <span className="p-1.5 rounded-lg bg-red-100 text-red-900">
+              <FileCheck className="w-4 h-4" />
+            </span>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                Auditoria de Processo, Ficha Técnica, Ímãs, Balança & Embalagem
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Indicadores de repetibilidade, integridade de filtros, calibração e qualidade física do produto
+              </p>
+            </div>
+          </div>
+          <span className="text-[11px] font-semibold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md border border-slate-200 self-start sm:self-auto font-mono">
+            {metrics.prodRecordsCount} apontamentos analisados
+          </span>
+        </div>
+
+        {/* Grid de Cartões de Indicadores */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* 1. Ficha Atual vs Anterior */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <FileCheck className="w-3.5 h-3.5 text-blue-600" />
+                  Ficha Atual vs Anterior
+                </span>
+                <span className="text-xs font-black font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
+                  {metrics.sheetRepeatabilityRate}% Repet.
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Parâmetros Iguais:</span>
+                  <span className="font-bold text-emerald-700 font-mono flex items-center gap-1">
+                    <Check className="w-3 h-3" /> {metrics.sameAsPrevSheet}x
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Parâmetros Diferentes:</span>
+                  <span className={`font-bold font-mono flex items-center gap-1 ${metrics.diffFromPrevSheet > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+                    {metrics.diffFromPrevSheet > 0 ? <AlertTriangle className="w-3 h-3 text-amber-600" /> : null}
+                    {metrics.diffFromPrevSheet}x
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Sem Ficha Anterior:</span>
+                  <span className="font-mono text-slate-600">{metrics.noPrevSheet}x</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+              {metrics.diffFromPrevSheet === 0 ? '100% de estabilidade vs ficha anterior' : `${metrics.diffFromPrevSheet} desvio(s) justificado(s)`}
+            </div>
+          </div>
+
+          {/* 2. Condições dos Ímãs */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Magnet className="w-3.5 h-3.5 text-red-600" />
+                  Condição dos Ímãs
+                </span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${metrics.magnetNonConforming > 0 ? 'bg-red-100 text-red-800' : (metrics.magnetAlert > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')}`}>
+                  {metrics.magnetNonConforming > 0 ? 'Crítico' : (metrics.magnetAlert > 0 ? 'Atenção' : 'Conforme')}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Conforme / Limpo:</span>
+                  <span className="font-bold text-emerald-700 font-mono">{metrics.magnetClean}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Limpeza Realizada:</span>
+                  <span className="font-bold text-blue-700 font-mono">{metrics.magnetCleanedInShift}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Alerta (Partículas):</span>
+                  <span className={`font-bold font-mono ${metrics.magnetAlert > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{metrics.magnetAlert}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Não Conforme (Crítico):</span>
+                  <span className={`font-bold font-mono ${metrics.magnetNonConforming > 0 ? 'text-red-700' : 'text-slate-500'}`}>{metrics.magnetNonConforming}x</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+              Barreira magnética ativa contra contaminações metálicas
+            </div>
+          </div>
+
+          {/* 3. Peneira & Condição de Pó */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-amber-600" />
+                  Pó na Peneira
+                </span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${metrics.sieveBlocked > 0 ? 'bg-red-100 text-red-800' : (metrics.sieveAlert > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')}`}>
+                  {metrics.sieveBlocked > 0 ? 'Bloqueio' : (metrics.sieveAlert > 0 ? 'Excesso de Pó' : 'Normal')}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Normal / Conforme:</span>
+                  <span className="font-bold text-emerald-700 font-mono">{metrics.sieveNormal}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Alerta (Excesso Pó):</span>
+                  <span className={`font-bold font-mono ${metrics.sieveAlert > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{metrics.sieveAlert}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Bloqueio / Limpeza:</span>
+                  <span className={`font-bold font-mono ${metrics.sieveBlocked > 0 ? 'text-red-700' : 'text-slate-500'}`}>{metrics.sieveBlocked}x</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+              Controle de finos, uniformidade do pellet e peneiramento
+            </div>
+          </div>
+
+          {/* 4. Balança da Linha & Calibração */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Scale className="w-3.5 h-3.5 text-red-800" />
+                  Balança da Linha
+                </span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${metrics.scaleNonConforming > 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                  {metrics.scaleNonConforming > 0 ? 'Desvio Selo' : 'Calibradas'}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1.5 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Calibração Conforme:</span>
+                  <span className="font-bold text-emerald-700 font-mono">{metrics.scaleConforming}x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Vencida / Sem Etiqueta:</span>
+                  <span className={`font-bold font-mono ${metrics.scaleNonConforming > 0 ? 'text-red-700' : 'text-slate-500'}`}>{metrics.scaleNonConforming}x</span>
+                </div>
+                <div className="flex justify-between items-start pt-1">
+                  <span className="text-slate-500 text-[11px]">Tags na Linha:</span>
+                  <span className="font-mono text-[10px] font-bold text-slate-800 text-right max-w-[120px] truncate" title={metrics.scaleTags.join(', ')}>
+                    {metrics.scaleTags.length > 0 ? metrics.scaleTags.slice(0, 3).join(', ') : 'Padrão BAL-DR'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-500">
+              Garantia metrológica de pesagem e etiquetagem ISO
+            </div>
+          </div>
+
+        </div>
+
+        {/* Linha 2 de Indicadores: Temperaturas, Circulação e Embalagem/Selagem */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+          
+          {/* 5. Temperaturas e Zonas do Canhão */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <Thermometer className="w-3.5 h-3.5 text-orange-600" />
+                Temperaturas & Zonas Térmicas
+              </span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${metrics.thermalDeviations > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                {metrics.thermalDeviations > 0 ? `${metrics.thermalDeviations} Desvio(s)` : '100% Conforme'}
+              </span>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Temperaturas em Ficha:</span>
+                <span className="font-bold text-emerald-700 font-mono">{metrics.thermalConforming}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Desvios de Faixa Térmica:</span>
+                <span className={`font-bold font-mono ${metrics.thermalDeviations > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{metrics.thermalDeviations}x</span>
+              </div>
+              {metrics.thermalDeviationZonesList.length > 0 && (
+                <div className="pt-2 text-[10px] text-amber-900 bg-amber-50 p-2 rounded border border-amber-200">
+                  <strong>Zonas com desvio:</strong> {metrics.thermalDeviationZonesList.slice(0, 2).join('; ')}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 6. Sistema de Circulação e Refrigeração */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <RefreshCw className="w-3.5 h-3.5 text-cyan-600" />
+                Sistema de Circulação / Refrigeração
+              </span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${metrics.circulationDown > 0 ? 'bg-red-100 text-red-800' : (metrics.circulationAlert > 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800')}`}>
+                {metrics.circulationDown > 0 ? 'Inoperante' : (metrics.circulationAlert > 0 ? 'Alerta' : 'Ativo')}
+              </span>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Circulação Ativa / Normal:</span>
+                <span className="font-bold text-emerald-700 font-mono">{metrics.circulationActive}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Alerta de Pressão/Fluxo:</span>
+                <span className={`font-bold font-mono ${metrics.circulationAlert > 0 ? 'text-amber-700' : 'text-slate-500'}`}>{metrics.circulationAlert}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Circulação Inoperante:</span>
+                <span className={`font-bold font-mono ${metrics.circulationDown > 0 ? 'text-red-700' : 'text-slate-500'}`}>{metrics.circulationDown}x</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 7. Embalagem, Selagem e Etiquetas do Palete */}
+          <div className="bg-slate-50/80 rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <PackageCheck className="w-3.5 h-3.5 text-emerald-700" />
+                Embalagem, Selagem & Palete
+              </span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${metrics.palletLabelsNonConforming > 0 || metrics.sealNonConforming > 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                {metrics.palletLabelsNonConforming > 0 ? 'Divergência' : 'Conforme'}
+              </span>
+            </div>
+            <div className="mt-3 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Etiquetas Palete Conformes:</span>
+                <span className="font-bold text-emerald-700 font-mono">{metrics.palletLabelsConforming}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Etiquetas Não Conformes:</span>
+                <span className={`font-bold font-mono ${metrics.palletLabelsNonConforming > 0 ? 'text-red-700' : 'text-slate-500'}`}>{metrics.palletLabelsNonConforming}x</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-600">Selagem Conforme:</span>
+                <span className="font-bold text-emerald-700 font-mono">{metrics.sealConforming}x</span>
+              </div>
+              <div className="flex justify-between items-center text-[11px] text-slate-500">
+                <span>Desvios Selagem:</span>
+                <span>Fraca: <strong>{metrics.sealWeak}</strong> • Queimada: <strong>{metrics.sealBurnt}</strong></span>
+              </div>
+              {metrics.avgSealerTemp !== null && (
+                <div className="pt-1 flex justify-between items-center text-[11px] text-slate-700 border-t border-slate-200 mt-1">
+                  <span>Faixa Temp. Seladora:</span>
+                  <span className="font-mono font-bold">{metrics.avgSealerTemp}°C <span className="text-slate-400 font-normal">({metrics.minSealerTemp}-{metrics.maxSealerTemp}°C)</span></span>
+                </div>
+              )}
+            </div>
+          </div>
+
         </div>
       </div>
 

@@ -328,7 +328,7 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
 
                       <td className="py-3 px-3 text-center whitespace-nowrap">
                         {status === 'em_producao' ? (
-                          <div className="flex flex-col items-center gap-1">
+                          <div className="flex flex-col items-center gap-0.5">
                             {r.temperaturesConforming ? (
                               <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -338,6 +338,15 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                               <span className="text-[10px] text-red-700 font-semibold flex items-center gap-1">
                                 <AlertTriangle className="w-3 h-3 text-red-600" />
                                 <span>Desvio Ficha</span>
+                              </span>
+                            )}
+                            {r.scaleCalibrationConforming === false || r.scaleIdentificationConforming === false || r.scaleCalibrationStatus === 'vencida' ? (
+                              <span className="text-[9px] text-red-700 font-bold bg-red-50 border border-red-200 px-1.5 py-0.2 rounded">
+                                Desvio Balança
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-slate-500 font-mono">
+                                {r.scaleTagNumber || `BAL-${r.machineId}`} OK
                               </span>
                             )}
                           </div>
@@ -603,9 +612,9 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                   {/* Controle Físico, Seladora & Embalagem */}
                   <div>
                     <h4 className="font-bold text-slate-900 uppercase text-[11px] mb-2 border-b pb-1">
-                      Controle Físico & Embalagem
+                      Controle Físico, Balança da Linha & Embalagem
                     </h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                       <div className="p-2.5 bg-slate-50 border rounded-lg">
                         <span className="text-slate-500 block text-[10px]">Ímã:</span>
                         <strong className="capitalize text-slate-800">{activeRecordForModal.magnetStatus}</strong>
@@ -613,6 +622,28 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                       <div className="p-2.5 bg-slate-50 border rounded-lg">
                         <span className="text-slate-500 block text-[10px]">Peneira:</span>
                         <strong className="capitalize text-slate-800">{activeRecordForModal.sievePowderCondition}</strong>
+                      </div>
+                      <div className="p-2.5 bg-slate-50 border rounded-lg">
+                        <span className="text-slate-500 block text-[10px]">Balança Calibração:</span>
+                        <strong className={activeRecordForModal.scaleCalibrationConforming !== false && activeRecordForModal.scaleCalibrationStatus !== 'vencida' && activeRecordForModal.scaleCalibrationStatus !== 'sem_etiqueta' ? 'text-emerald-700' : 'text-red-700'}>
+                          {activeRecordForModal.scaleCalibrationStatus ? (
+                            activeRecordForModal.scaleCalibrationStatus === 'conforme' ? 'Válida' :
+                            activeRecordForModal.scaleCalibrationStatus === 'vencida' ? 'Vencida' :
+                            activeRecordForModal.scaleCalibrationStatus === 'sem_etiqueta' ? 'Sem Etiqueta' : 'Danificada'
+                          ) : (activeRecordForModal.scaleCalibrationConforming === false ? 'Desvio' : 'Válida')}
+                        </strong>
+                        {activeRecordForModal.scaleCalibrationValidityDate && (
+                          <span className="text-[10px] text-slate-500 block font-mono">Val: {activeRecordForModal.scaleCalibrationValidityDate}</span>
+                        )}
+                      </div>
+                      <div className="p-2.5 bg-slate-50 border rounded-lg">
+                        <span className="text-slate-500 block text-[10px]">Balança Tag:</span>
+                        <strong className={activeRecordForModal.scaleIdentificationConforming === false ? 'text-red-700' : 'text-slate-800'}>
+                          {activeRecordForModal.scaleTagNumber || `BAL-${activeRecordForModal.machineId}`}
+                        </strong>
+                        {activeRecordForModal.scaleIdentificationConforming === false && (
+                          <span className="text-[10px] text-red-600 block">Divergente</span>
+                        )}
                       </div>
                       <div className="p-2.5 bg-slate-50 border rounded-lg">
                         <span className="text-slate-500 block text-[10px]">Temp Seladora:</span>

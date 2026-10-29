@@ -13,6 +13,8 @@ import {
   Dos02HomogenizationStatus,
   CirculationSystemStatus,
   DosersCheckData,
+  ScaleCalibrationStatus,
+  ScaleIdentificationStatus,
   Operator,
   ShiftLeader,
   ProductionRecord,
@@ -36,7 +38,8 @@ import {
   Clock,
   Layers,
   Activity,
-  Gauge
+  Gauge,
+  Scale
 } from 'lucide-react';
 import { TeamManagerModal } from './TeamManagerModal';
 import { getGlobalLineStatuses } from '../utils/storage';
@@ -91,6 +94,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 
   const handleMachineChange = (newMachine: MachineId) => {
     setMachineId(newMachine);
+    setScaleTagNumber(`BAL-${newMachine}`);
     const globalConfig = getGlobalLineStatuses();
     const preset = globalConfig[newMachine];
     if (preset) {
@@ -167,6 +171,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   const [sealingQuality, setSealingQuality] = useState<SealingQuality>('conforme');
   const [packagingNotes, setPackagingNotes] = useState<string>('');
 
+  // Balança da Linha (Conferência de Etiquetas de Calibração e Identificação)
+  const [scaleCalibrationConforming, setScaleCalibrationConforming] = useState<boolean>(true);
+  const [scaleCalibrationStatus, setScaleCalibrationStatus] = useState<ScaleCalibrationStatus>('conforme');
+  const [scaleCalibrationValidityDate, setScaleCalibrationValidityDate] = useState<string>('12/2026');
+  const [scaleIdentificationConforming, setScaleIdentificationConforming] = useState<boolean>(true);
+  const [scaleTagNumber, setScaleTagNumber] = useState<string>(() => `BAL-${initialMachine || 'DR01'}`);
+  const [scaleCheckNotes, setScaleCheckNotes] = useState<string>('');
+
   // Comunicação de Desvios ao Líder com Horário
   const [deviationReportedToLeader, setDeviationReportedToLeader] = useState<boolean>(false);
   const [deviationReportTime, setDeviationReportTime] = useState<string>(() => {
@@ -220,6 +232,9 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     !sealerTempConforming || 
     !labelCodesConforming || 
     sealingQuality !== 'conforme' ||
+    !scaleCalibrationConforming ||
+    scaleCalibrationStatus !== 'conforme' ||
+    !scaleIdentificationConforming ||
     dos02Homogenization === 'irregular' ||
     !sideFeederConforming ||
     circulationSystemStatus === 'inativo' ||
@@ -268,34 +283,144 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     e.preventDefault();
     const newErrors: string[] = [];
 
-    if (!operatorName.trim()) newErrors.push('Selecione o operador da linha.');
+    if (!operatorName.trim()) newErrors.push('Selecione o operador responsável pela linha.');
     if (!shiftLeader.trim()) newErrors.push('Selecione o líder do turno.');
 
     if (lineStatus === 'manutencao') {
       if (!maintenanceOrderNumber.trim()) {
-        newErrors.push('Para linha em Manutenção, informe o número da OM.');
+        newErrors.push('Para linha em Manutenção, informe o número da Ordem de Manutenção (OM).');
       }
     } else if (lineStatus === 'setup') {
       if (!setupMaterial.trim()) {
         newErrors.push('Para linha em Setup, informe o material que está em setup.');
       }
+    } else if (lineStatus === 'preventiva') {
+      if (!operationalDeviationsNotes.trim()) {
+        newErrors.push('Para linha em Preventiva, descreva o escopo da manutenção preventiva.');
+      }
     } else if (lineStatus === 'em_producao') {
-      if (!productionOrder.trim()) newErrors.push('Número da OP é obrigatório.');
+      // 1. Identificação do Produto e Ordem
+      if (!productionOrder.trim()) newErrors.push('Número da Ordem de Produção (OP) é obrigatório.');
       if (!batchNumber.trim()) newErrors.push('Número do lote é obrigatório.');
-      
+      if (!productName.trim()) newErrors.push('Informe a descrição/código do Produto / Composto.');
+
+      // 2. Parâmetros de Processo Atuais
       const prodNum = parseFloat(productivityKgh);
-      if (isNaN(prodNum) || prodNum < 0) {
-        newErrors.push('Informe um valor válido para a produtividade atual (kg/h).');
+      if (isNaN(prodNum) || prodNum <= 0) {
+        newErrors.push('Informe um valor válido e positivo para a produtividade atual (kg/h).');
       }
 
-      if (!parametersMatchPreviousSheet && !parameterDeviationReason.trim()) {
-        newErrors.push('Informe o motivo quando os parâmetros não estão de acordo com a ficha anterior.');
+      const targetNum = parseFloat(targetProductivityKgh);
+      if (isNaN(targetNum) || targetNum <= 0) {
+        newErrors.push('Informe a meta de produtividade planejada (kg/h).');
       }
 
+      const rpmNum = parseFloat(rpm);
+      if (isNaN(rpmNum) || rpmNum <= 0) {
+        newErrors.push('Informe o RPM atual da rosca da extrusora.');
+      }
+
+      const ampNum = parseFloat(motorAmperes);
+      if (isNaN(ampNum) || ampNum <= 0) {
+        newErrors.push('Informe a corrente do motor principal (Amperes).');
+      }
+
+      // 3. Ficha Técnica Anterior e Desvios de Parâmetros
+      if (hasPreviousReferenceSheet) {
+        if (!prevProductivityKgh || isNaN(parseFloat(prevProductivityKgh))) {
+          newErrors.push('Informe a produtividade da ficha de referência anterior (kg/h).');
+        }
+        if (!prevRpm || isNaN(parseFloat(prevRpm))) {
+          newErrors.push('Informe o RPM da ficha de referência anterior.');
+        }
+        if (!prevMotorAmperes || isNaN(parseFloat(prevMotorAmperes))) {
+          newErrors.push('Informe a corrente (A) da ficha de referência anterior.');
+        }
+        if (!parametersMatchPreviousSheet) {
+          if (!parameterDeviationReason.trim()) {
+            newErrors.push('Informe obrigatoriamente o motivo pelo qual os parâmetros estão diferentes da ficha anterior.');
+          }
+          if (deviationApprovedByLeader && !approvingLeaderName.trim()) {
+            newErrors.push('Informe o nome do líder que aprovou o desvio de parâmetros em relação à ficha.');
+          }
+        }
+      }
+
+      // 4. Temperaturas do Canhão
+      if (temperaturesConforming === false && !temperatureDeviationZones.trim()) {
+        newErrors.push('Para temperaturas não conformes, aponte quais zonas ou faixas estão fora de ficha.');
+      }
+
+      // 5. Dosadoras & Alimentação
+      if (!dosers.dos01.value || !dosers.dos01.value.trim()) {
+        newErrors.push('Informe o valor/resina da Dosadora 01 (DOS01).');
+      }
+      if (!dos02Homogenization) {
+        newErrors.push('Informe a verificação de homogeneização da DOS02 (Conforme ou Não Conforme).');
+      }
+      if (dos02Homogenization === 'irregular' && !dos02HomogenizationNotes.trim()) {
+        newErrors.push('Descreva o desvio de homogeneização observado na DOS02.');
+      }
+
+      // 6. Side Feeder (se ativo)
+      if (hasSideFeeder) {
+        const sfRpm = parseFloat(sideFeederCurrentRpm);
+        if (isNaN(sfRpm) || sfRpm <= 0) {
+          newErrors.push('Para Side Feeder em uso, informe o RPM atual.');
+        }
+      }
+
+      // 7. Sistema de Circulação e Refrigeração
+      if (!circulationSystemStatus) {
+        newErrors.push('Selecione a condição do sistema de circulação/refrigeração da máquina.');
+      }
+
+      // 8. Condição dos Ímãs
+      if (!magnetStatus) {
+        newErrors.push('Selecione a condição de inspeção do ímã (Limpo, Limalha Detectada, Limpeza no Turno ou Não Conforme).');
+      }
+      if ((magnetStatus === 'limalha_detectada' || magnetStatus === 'nao_conforme') && !magnetNotes.trim()) {
+        newErrors.push('Descreva a contaminação ou presença de partículas identificada no ímã.');
+      }
+
+      // 9. Condição de Pó na Peneira
+      if (!sievePowderCondition) {
+        newErrors.push('Selecione a condição de pó na peneira (Normal, Excesso de Pó, Obstruída ou Finos).');
+      }
+      if (sievePowderCondition !== 'normal' && !sieveNotes.trim()) {
+        newErrors.push('Descreva a observação do pó ou bloqueio na peneira.');
+      }
+
+      // 10. Balança da Linha (Calibração e Identificação)
+      if (!scaleCalibrationStatus) {
+        newErrors.push('Selecione a condição da etiqueta de calibração da balança.');
+      }
+      if (!scaleTagNumber.trim()) {
+        newErrors.push('Informe a identificação / Tag patrimonial da balança da linha (ex: BAL-DR01).');
+      }
+      if (scaleCalibrationStatus === 'conforme' && !scaleCalibrationValidityDate.trim()) {
+        newErrors.push('Informe a data de validade que consta na etiqueta de calibração da balança.');
+      }
+      if (scaleCalibrationStatus !== 'conforme' && !scaleCheckNotes.trim()) {
+        newErrors.push('Descreva a não conformidade constatada na calibração da balança da linha.');
+      }
+
+      // 11. Embalagem, Selagem e Etiquetas do Palete
+      if (!sealerTempMeasured || isNaN(parseFloat(sealerTempMeasured))) {
+        newErrors.push('Informe a temperatura medida na seladora (°C).');
+      }
+      if (!sealingQuality) {
+        newErrors.push('Selecione a avaliação da qualidade da selagem da embalagem.');
+      }
+      if ((labelCodesConforming === false || sealingQuality !== 'conforme' || sealerTempConforming === false) && !packagingNotes.trim()) {
+        newErrors.push('Descreva a observação / não conformidade no setor de embalagem e selagem.');
+      }
+
+      // 12. Paradas de Máquina
       if (hasStoppage) {
         const stopQty = parseInt(stoppageQuantity, 10);
         if (isNaN(stopQty) || stopQty <= 0) {
-          newErrors.push('Informe a quantidade de paradas da máquina.');
+          newErrors.push('Informe a quantidade de paradas ocorridas na máquina.');
         }
         if (stoppageReasonsList.length === 0) {
           newErrors.push('Selecione pelo menos um motivo para a parada da máquina.');
@@ -303,11 +428,21 @@ export const EntryForm: React.FC<EntryFormProps> = ({
       }
 
       if (hasMaintenanceOrderInProd && !maintenanceOrderNumber.trim()) {
-        newErrors.push('Informe o número da Ordem de Manutenção (OM).');
+        newErrors.push('Informe o número da Ordem de Manutenção (OM) aberta durante a produção.');
       }
 
-      if (hasAnyQualityDeviation && deviationReportedToLeader && !deviationReportTime.trim()) {
-        newErrors.push('Informe o horário em que o desvio foi comunicado ao líder.');
+      // 13. Comunicação Obrigatória ao Líder de Turno em Caso de Desvio
+      if (hasAnyQualityDeviation) {
+        if (!deviationReportedToLeader) {
+          newErrors.push('ATENÇÃO: Existem desvios operacionais/qualidade apontados. É OBRIGATÓRIO confirmar se o líder do turno foi comunicado.');
+        } else {
+          if (!deviationReportTime.trim()) {
+            newErrors.push('Informe o horário exato em que o líder do turno foi comunicado sobre o desvio.');
+          }
+          if (!deviationReportLeaderName.trim()) {
+            newErrors.push('Informe o nome do líder comunicado sobre os desvios de processo/qualidade.');
+          }
+        }
       }
     }
 
@@ -439,6 +574,13 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         labelCodesConforming,
         sealingQuality,
         packagingNotes: packagingNotes.trim() || undefined,
+        
+        scaleCalibrationConforming,
+        scaleCalibrationStatus,
+        scaleCalibrationValidityDate: scaleCalibrationValidityDate.trim() || undefined,
+        scaleIdentificationConforming,
+        scaleTagNumber: scaleTagNumber.trim().toUpperCase() || undefined,
+        scaleCheckNotes: scaleCheckNotes.trim() || undefined,
         
         deviationReportedToLeader,
         deviationReportTime: deviationReportedToLeader ? deviationReportTime : undefined,
@@ -1611,14 +1753,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
               </div>
             </div>
 
-            {/* Bloco 6: Ímã, Peneira, Seladoras & Embalagens */}
+            {/* Bloco 6: Ímã, Peneira, Balança da Linha, Seladoras & Embalagens */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
                 <div className="w-7 h-7 rounded-md bg-red-800 text-white flex items-center justify-center text-xs font-bold font-mono">
                   6
                 </div>
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
-                  Ímã, Peneira, Seladoras & Embalagens
+                  Ímã, Peneira, Balança da Linha, Seladoras & Embalagens
                 </h2>
               </div>
 
@@ -1670,6 +1812,164 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                     className="w-full text-xs bg-white border border-slate-300 rounded p-1.5 focus:outline-none"
                   />
                 </div>
+              </div>
+
+              {/* CONFERÊNCIA OBRIGATÓRIA DA BALANÇA DA LINHA (CALIBRAÇÃO E IDENTIFICAÇÃO) */}
+              <div className="p-4 bg-slate-50 border-2 border-slate-200 rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-md bg-red-800 text-white flex items-center justify-center">
+                      <Scale className="w-3.5 h-3.5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
+                        Balança da Linha · Calibração & Identificação
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Conferência obrigatória: certifique-se de que a balança está identificada e com etiqueta de calibração válida.
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                    scaleCalibrationConforming && scaleIdentificationConforming && scaleCalibrationStatus === 'conforme'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                      : 'bg-red-50 text-red-800 border-red-300'
+                  }`}>
+                    {scaleCalibrationConforming && scaleIdentificationConforming && scaleCalibrationStatus === 'conforme'
+                      ? 'Balança Conforme'
+                      : 'Desvio na Balança'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* 1. Etiqueta de Calibração */}
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg space-y-2.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <span>Etiqueta de Calibração:</span>
+                      </label>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScaleCalibrationConforming(true);
+                            setScaleCalibrationStatus('conforme');
+                          }}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded cursor-pointer ${
+                            scaleCalibrationConforming ? 'bg-emerald-700 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          Conforme / Válida
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScaleCalibrationConforming(false);
+                            if (scaleCalibrationStatus === 'conforme') setScaleCalibrationStatus('vencida');
+                          }}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded cursor-pointer ${
+                            !scaleCalibrationConforming ? 'bg-red-700 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          Incorreta / Vencida
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Status da Calibração:</label>
+                        <select
+                          value={scaleCalibrationStatus}
+                          onChange={(e) => {
+                            const val = e.target.value as ScaleCalibrationStatus;
+                            setScaleCalibrationStatus(val);
+                            setScaleCalibrationConforming(val === 'conforme');
+                          }}
+                          className="w-full text-xs bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:bg-white"
+                        >
+                          <option value="conforme">Conforme - Dentro da Validade</option>
+                          <option value="vencida">Calibração Vencida / Expirada</option>
+                          <option value="sem_etiqueta">Sem Etiqueta de Calibração</option>
+                          <option value="danificada">Etiqueta Danificada / Ilegível</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Validade Impressa na Etiqueta:</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: 12/2026 ou 15/11/2026"
+                          value={scaleCalibrationValidityDate}
+                          onChange={(e) => setScaleCalibrationValidityDate(e.target.value)}
+                          className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. Identificação da Balança */}
+                  <div className="p-3 bg-white border border-slate-200 rounded-lg space-y-2.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-800">
+                        Identificação da Balança (Tag / Patrimônio):
+                      </label>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setScaleIdentificationConforming(true)}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded cursor-pointer ${
+                            scaleIdentificationConforming ? 'bg-emerald-700 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          Conforme
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setScaleIdentificationConforming(false)}
+                          className={`px-2.5 py-1 text-xs font-semibold rounded cursor-pointer ${
+                            !scaleIdentificationConforming ? 'bg-red-700 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          Divergente / Ausente
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Código / Tag da Balança:</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: BAL-DR01"
+                          value={scaleTagNumber}
+                          onChange={(e) => setScaleTagNumber(e.target.value.toUpperCase())}
+                          className="w-full text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:bg-white uppercase"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">Obs. da Balança (opcional):</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: Prato limpo, zerada corretamente"
+                          value={scaleCheckNotes}
+                          onChange={(e) => setScaleCheckNotes(e.target.value)}
+                          className="w-full text-xs bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Alerta de Desvio na Balança */}
+                {(!scaleCalibrationConforming || scaleCalibrationStatus !== 'conforme' || !scaleIdentificationConforming) && (
+                  <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-xs text-red-900 animate-in fade-in">
+                    <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                    <span>
+                      <strong>Atenção:</strong> Balança com etiqueta de calibração vencida/ausente ou identificação divergente. O ensaque e a pesagem de embalagens não devem prosseguir sem a validação do Líder de Turno.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -1770,7 +2070,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <span className="text-xs font-bold text-amber-950 block">
-                      Desvio Identificado (Seladora, Etiqueta, Selagem ou Ficha) foi repassado ao Líder?
+                      Desvio Identificado (Balança, Seladora, Etiqueta, Selagem ou Ficha) foi repassado ao Líder?
                     </span>
                     <span className="text-[11px] text-amber-800">
                       Registre se a liderança foi acionada para alinhamento operacional.

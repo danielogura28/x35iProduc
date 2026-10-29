@@ -56,6 +56,9 @@ export type Dos02HomogenizationStatus = 'conforme' | 'irregular' | 'nao_aplicave
 
 export type CirculationSystemStatus = 'ativo' | 'inativo';
 
+export type ScaleCalibrationStatus = 'conforme' | 'vencida' | 'sem_etiqueta' | 'danificada';
+export type ScaleIdentificationStatus = 'conforme' | 'divergente' | 'sem_identificacao';
+
 export type StoppageReason = 
   | 'Mecânica' 
   | 'Elétrica' 
@@ -186,6 +189,14 @@ export interface ProductionRecord {
   labelCodesConforming?: boolean;
   sealingQuality?: SealingQuality;
   packagingNotes?: string;
+  
+  // Balança da Linha (Conferência Obrigatória de Calibração e Identificação)
+  scaleCalibrationConforming?: boolean; // Etiqueta de calibração correta/válida
+  scaleCalibrationStatus?: ScaleCalibrationStatus; // 'conforme' | 'vencida' | 'sem_etiqueta' | 'danificada'
+  scaleCalibrationValidityDate?: string; // Data de validade da calibração (opcional, ex: "12/2026")
+  scaleIdentificationConforming?: boolean; // Etiqueta de identificação/patrimônio correta
+  scaleTagNumber?: string; // Código/Tag da Balança (ex: "BAL-DR01")
+  scaleCheckNotes?: string; // Observações da balança
   
   // Notificação de Desvios ao Líder com Horário
   deviationReportedToLeader?: boolean;

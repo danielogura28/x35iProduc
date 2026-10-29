@@ -82,6 +82,40 @@ export function exportMonthlyReportToExcel(
   const totalSetupChecks = monthRecords.filter(r => r.lineStatus === 'setup').length;
   const totalPreventiveChecks = monthRecords.filter(r => r.lineStatus === 'preventiva').length;
 
+  // Auditoria Detalhada Mensal
+  const mSheetSame = prodRecords.filter(r => r.hasPreviousReferenceSheet && r.parametersMatchPreviousSheet).length;
+  const mSheetDiff = prodRecords.filter(r => r.hasPreviousReferenceSheet && !r.parametersMatchPreviousSheet).length;
+  const mSheetNoRef = prodRecords.filter(r => !r.hasPreviousReferenceSheet).length;
+  const mSheetRepeatRate = (mSheetSame + mSheetDiff) > 0 ? Math.round((mSheetSame / (mSheetSame + mSheetDiff)) * 100) : 100;
+
+  const mMagnetClean = prodRecords.filter(r => (r.magnetStatus || 'limpo') === 'limpo').length;
+  const mMagnetCleaned = prodRecords.filter(r => r.magnetStatus === 'limpeza_realizada').length;
+  const mMagnetAlert = prodRecords.filter(r => r.magnetStatus === 'limalha_detectada').length;
+  const mMagnetCrit = prodRecords.filter(r => r.magnetStatus === 'nao_conforme').length;
+
+  const mSieveNormal = prodRecords.filter(r => (r.sievePowderCondition || 'normal') === 'normal').length;
+  const mSieveAlert = prodRecords.filter(r => r.sievePowderCondition === 'excesso_po' || r.sievePowderCondition === 'presenca_finos').length;
+  const mSieveBlocked = prodRecords.filter(r => r.sievePowderCondition === 'peneira_obstruida').length;
+
+  const mScaleConf = prodRecords.filter(r => r.scaleCalibrationConforming || r.scaleCalibrationStatus === 'conforme').length;
+  const mScaleNonConf = prodRecords.filter(r => (r.scaleCalibrationConforming === false) || (r.scaleCalibrationStatus && r.scaleCalibrationStatus !== 'conforme')).length;
+  const mScaleTags = Array.from(new Set(prodRecords.map(r => r.scaleTagNumber || `BAL-${r.machineId}`).filter(Boolean))).join(', ') || 'BAL-DR';
+
+  const mThermConf = prodRecords.filter(r => r.temperaturesConforming).length;
+  const mThermDev = prodRecords.filter(r => !r.temperaturesConforming).length;
+
+  const mCircActive = prodRecords.filter(r => (r.circulationSystemStatus || 'ativo') === 'ativo').length;
+  const mCircAlert = 0;
+  const mCircDown = prodRecords.filter(r => r.circulationSystemStatus === 'inativo').length;
+
+  const mLabelConf = prodRecords.filter(r => r.labelCodesConforming).length;
+  const mLabelDev = prodRecords.filter(r => r.labelCodesConforming === false).length;
+
+  const mSealConf = prodRecords.filter(r => (r.sealingQuality || 'conforme') === 'conforme').length;
+  const mSealWeak = prodRecords.filter(r => r.sealingQuality === 'aberta').length;
+  const mSealBurnt = prodRecords.filter(r => r.sealingQuality === 'queimada').length;
+  const mSealCrit = prodRecords.filter(r => r.sealingQuality === 'defeituosa').length;
+
   // ========================================================================
   // ABA 1: PAINEL EXECUTIVO & DASHBOARD POWER BI
   // ========================================================================
@@ -321,6 +355,68 @@ export function exportMonthlyReportToExcel(
     });
   }
 
+  dashboardRows.push(['']);
+  dashboardRows.push(['┌───────────────────────────────────────────────────────────────────────────────────────────────────┐']);
+  dashboardRows.push(['│ 5. AUDITORIA OPERACIONAL & QUALIDADE (FICHA, ÍMÃS, BALANÇA, PENEIRA & SELAGEM)                    │']);
+  dashboardRows.push(['└───────────────────────────────────────────────────────────────────────────────────────────────────┘']);
+  dashboardRows.push(['Item de Inspeção', 'Resultado Acumulado no Mês', 'Status Operacional', 'Gráfico Visual', 'Observações / Detalhes']);
+
+  dashboardRows.push([
+    'Ficha Técnica: Parâmetros Iguais à Ref. Anterior',
+    `${mSheetSame}x`,
+    mSheetDiff === 0 ? '🟢 100% REPETIBILIDADE' : `🟡 ${mSheetRepeatRate}% REPETÍVEL`,
+    generateVisualBar(mSheetSame, Math.max(1, mSheetSame + mSheetDiff), 14),
+    `Diferentes/Desvio: ${mSheetDiff}x | Sem Ref.: ${mSheetNoRef}x`
+  ]);
+
+  dashboardRows.push([
+    'Condição dos Ímãs: Conforme / Limpos',
+    `${mMagnetClean}x`,
+    mMagnetCrit > 0 ? '🔴 CONTAMINAÇÃO CRÍTICA' : (mMagnetAlert > 0 ? '🟡 ALERTA PARTÍCULAS' : '🟢 ÍMÃS LIMPOS'),
+    generateVisualBar(mMagnetClean, Math.max(1, prodRecords.length), 14),
+    `Limpezas no Turno: ${mMagnetCleaned}x | Alertas: ${mMagnetAlert}x | Crítico: ${mMagnetCrit}x`
+  ]);
+
+  dashboardRows.push([
+    'Peneira de Classificação / Retenção de Pó',
+    `${mSieveNormal}x Normal`,
+    mSieveBlocked > 0 ? '🔴 BLOQUEIO DE TELA' : (mSieveAlert > 0 ? '🟡 EXCESSO DE FINOS' : '🟢 PENEIRA NORMAL'),
+    generateVisualBar(mSieveNormal, Math.max(1, prodRecords.length), 14),
+    `Alerta Pó/Finos: ${mSieveAlert}x | Bloqueada: ${mSieveBlocked}x`
+  ]);
+
+  dashboardRows.push([
+    'Balança da Linha: Etiqueta de Calibração',
+    `${mScaleConf}x Conforme`,
+    mScaleNonConf === 0 ? '🟢 BALANÇAS CALIBRADAS' : '🔴 DESVIO DE CALIBRAÇÃO',
+    generateVisualBar(mScaleConf, Math.max(1, prodRecords.length), 14),
+    `Vencida/Sem Selo: ${mScaleNonConf}x | Tags: ${mScaleTags}`
+  ]);
+
+  dashboardRows.push([
+    'Temperaturas do Canhão: Conformidade Térmica',
+    `${mThermConf}x Conforme`,
+    mThermDev === 0 ? '🟢 100% EM FICHA' : `🟡 ${mThermDev} DESVIO(S)`,
+    generateVisualBar(mThermConf, Math.max(1, prodRecords.length), 14),
+    `Desvios Térmicos Registrados: ${mThermDev}x`
+  ]);
+
+  dashboardRows.push([
+    'Sistema de Circulação / Refrigeração',
+    `${mCircActive}x Ativo`,
+    mCircDown > 0 ? '🔴 INOPERANTE' : (mCircAlert > 0 ? '🟡 ALERTA PRESSÃO/FLUXO' : '🟢 CIRCULAÇÃO NORMAL'),
+    generateVisualBar(mCircActive, Math.max(1, prodRecords.length), 14),
+    `Alertas: ${mCircAlert}x | Inoperante: ${mCircDown}x`
+  ]);
+
+  dashboardRows.push([
+    'Embalagem, Selagem & Etiquetas Palete',
+    `${mLabelConf}x Etiquetas OK`,
+    (mLabelDev > 0 || mSealCrit > 0) ? '🔴 DESVIO DE EMBALAGEM' : '🟢 SELAGEM CONFORME',
+    generateVisualBar(mLabelConf, Math.max(1, prodRecords.length), 14),
+    `Etiquetas Diverg.: ${mLabelDev}x | Selagem Conforme: ${mSealConf}x | Desvio Selagem: ${mSealWeak + mSealBurnt + mSealCrit}x`
+  ]);
+
   const wsDashboard = XLSX.utils.aoa_to_sheet(dashboardRows);
   wsDashboard['!cols'] = [
     { wch: 32 }, { wch: 22 }, { wch: 24 }, { wch: 30 },
@@ -545,6 +641,8 @@ export function exportMonthlyReportToExcel(
     'Avaliação Ímã',
     'Peneira / Pó',
     'Temp Seladora Correta?',
+    'Balança Calibração OK?',
+    'Balança Tag / Patrimônio',
     'Etiquetas Conformes?',
     'Qualidade Selagem',
     'Desvio Comunicado ao Líder?',
@@ -594,6 +692,8 @@ export function exportMonthlyReportToExcel(
     r.magnetStatus || '',
     r.sievePowderCondition || '',
     r.sealerTempConforming ? 'Correta' : (r.sealerTempConforming === false ? 'Incorreta' : ''),
+    r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' && r.scaleCalibrationStatus !== 'sem_etiqueta' ? 'Válida / Conforme' : `Desvio (${r.scaleCalibrationStatus || 'Incorreta'})`,
+    r.scaleTagNumber || `BAL-${r.machineId}`,
     r.labelCodesConforming ? 'Conforme' : (r.labelCodesConforming === false ? 'Divergente' : ''),
     r.sealingQuality || '',
     r.deviationReportedToLeader ? 'Sim' : 'Não',
@@ -775,26 +875,101 @@ export function exportDailyReportToExcel(
   dashboardRows.push(['┌───────────────────────────────────────────────────────────────────────────────────────────────────┐']);
   dashboardRows.push(['│ 3. RESUMO OPERACIONAL DAS LINHAS NO DIA                                                           │']);
   dashboardRows.push(['└───────────────────────────────────────────────────────────────────────────────────────────────────┘']);
-  dashboardRows.push(['Status Operacional', 'Quantidade de Registros', 'Participação %', 'Gráfico Visual']);
-  
-  const totalDay = dayRecords.length || 1;
-  const statusCounts = [
-    { label: 'Em Produção', count: prodRecords.length, icon: '🟢' },
-    { label: 'Em Manutenção (OM)', count: maintenanceCount, icon: '🔴' },
-    { label: 'Em Setup (Troca de Matriz/Cor)', count: setupCount, icon: '🟡' },
-    { label: 'Em Preventiva', count: preventiveCount, icon: '🔵' },
-    { label: 'Inativa / Desligada', count: dayRecords.filter(r => r.lineStatus === 'inativa').length, icon: '⚪' }
-  ];
+  // Auditoria Detalhada do Dia
+  const dailySheetSame = prodRecords.filter(r => r.hasPreviousReferenceSheet && r.parametersMatchPreviousSheet).length;
+  const dailySheetDiff = prodRecords.filter(r => r.hasPreviousReferenceSheet && !r.parametersMatchPreviousSheet).length;
+  const dailySheetNoRef = prodRecords.filter(r => !r.hasPreviousReferenceSheet).length;
+  const dailySheetRepeatRate = (dailySheetSame + dailySheetDiff) > 0 ? Math.round((dailySheetSame / (dailySheetSame + dailySheetDiff)) * 100) : 100;
 
-  for (const s of statusCounts) {
-    const pct = Math.round((s.count / totalDay) * 100);
-    dashboardRows.push([
-      `${s.icon} ${s.label}`,
-      s.count,
-      `${pct}%`,
-      generateVisualBar(pct, 100, 16)
-    ]);
-  }
+  const dailyMagnetClean = prodRecords.filter(r => (r.magnetStatus || 'limpo') === 'limpo').length;
+  const dailyMagnetCleaned = prodRecords.filter(r => r.magnetStatus === 'limpeza_realizada').length;
+  const dailyMagnetAlert = prodRecords.filter(r => r.magnetStatus === 'limalha_detectada').length;
+  const dailyMagnetCrit = prodRecords.filter(r => r.magnetStatus === 'nao_conforme').length;
+
+  const dailySieveNormal = prodRecords.filter(r => (r.sievePowderCondition || 'normal') === 'normal').length;
+  const dailySieveAlert = prodRecords.filter(r => r.sievePowderCondition === 'excesso_po' || r.sievePowderCondition === 'presenca_finos').length;
+  const dailySieveBlocked = prodRecords.filter(r => r.sievePowderCondition === 'peneira_obstruida').length;
+
+  const dailyScaleConf = prodRecords.filter(r => r.scaleCalibrationConforming || r.scaleCalibrationStatus === 'conforme').length;
+  const dailyScaleNonConf = prodRecords.filter(r => (r.scaleCalibrationConforming === false) || (r.scaleCalibrationStatus && r.scaleCalibrationStatus !== 'conforme')).length;
+  const dailyScaleTags = Array.from(new Set(prodRecords.map(r => r.scaleTagNumber || `BAL-${r.machineId}`).filter(Boolean))).join(', ') || 'BAL-DR';
+
+  const dailyThermConf = prodRecords.filter(r => r.temperaturesConforming).length;
+  const dailyThermDev = prodRecords.filter(r => !r.temperaturesConforming).length;
+
+  const dailyCircActive = prodRecords.filter(r => (r.circulationSystemStatus || 'ativo') === 'ativo').length;
+  const dailyCircAlert = 0;
+  const dailyCircDown = prodRecords.filter(r => r.circulationSystemStatus === 'inativo').length;
+
+  const dailyLabelConf = prodRecords.filter(r => r.labelCodesConforming).length;
+  const dailyLabelDev = prodRecords.filter(r => r.labelCodesConforming === false).length;
+
+  const dailySealConf = prodRecords.filter(r => (r.sealingQuality || 'conforme') === 'conforme').length;
+  const dailySealWeak = prodRecords.filter(r => r.sealingQuality === 'aberta').length;
+  const dailySealBurnt = prodRecords.filter(r => r.sealingQuality === 'queimada').length;
+  const dailySealCrit = prodRecords.filter(r => r.sealingQuality === 'defeituosa').length;
+
+  dashboardRows.push(['']);
+  dashboardRows.push(['┌───────────────────────────────────────────────────────────────────────────────────────────────────┐']);
+  dashboardRows.push(['│ 4. AUDITORIA OPERACIONAL & QUALIDADE (FICHA, ÍMÃS, BALANÇA, PENEIRA & SELAGEM)                    │']);
+  dashboardRows.push(['└───────────────────────────────────────────────────────────────────────────────────────────────────┘']);
+  dashboardRows.push(['Item de Inspeção', 'Resultado no Dia', 'Status Operacional', 'Gráfico / Proporção', 'Observações / Detalhes']);
+
+  dashboardRows.push([
+    'Ficha Técnica: Parâmetros Iguais à Ref. Anterior',
+    `${dailySheetSame}x`,
+    dailySheetDiff === 0 ? '🟢 100% REPETIBILIDADE' : `🟡 ${dailySheetRepeatRate}% REPETÍVEL`,
+    generateVisualBar(dailySheetSame, Math.max(1, dailySheetSame + dailySheetDiff), 14),
+    `Diferentes/Desvio: ${dailySheetDiff}x | Sem Ref.: ${dailySheetNoRef}x`
+  ]);
+
+  dashboardRows.push([
+    'Condição dos Ímãs: Conforme / Limpos',
+    `${dailyMagnetClean}x`,
+    dailyMagnetCrit > 0 ? '🔴 CONTAMINAÇÃO CRÍTICA' : (dailyMagnetAlert > 0 ? '🟡 ALERTA PARTÍCULAS' : '🟢 ÍMÃS LIMPOS'),
+    generateVisualBar(dailyMagnetClean, Math.max(1, prodRecords.length), 14),
+    `Limpezas no Turno: ${dailyMagnetCleaned}x | Alertas: ${dailyMagnetAlert}x | Crítico: ${dailyMagnetCrit}x`
+  ]);
+
+  dashboardRows.push([
+    'Peneira de Classificação / Retenção de Pó',
+    `${dailySieveNormal}x Normal`,
+    dailySieveBlocked > 0 ? '🔴 BLOQUEIO DE TELA' : (dailySieveAlert > 0 ? '🟡 EXCESSO DE FINOS' : '🟢 PENEIRA NORMAL'),
+    generateVisualBar(dailySieveNormal, Math.max(1, prodRecords.length), 14),
+    `Alerta Pó/Finos: ${dailySieveAlert}x | Bloqueada: ${dailySieveBlocked}x`
+  ]);
+
+  dashboardRows.push([
+    'Balança da Linha: Etiqueta de Calibração',
+    `${dailyScaleConf}x Conforme`,
+    dailyScaleNonConf === 0 ? '🟢 BALANÇAS CALIBRADAS' : '🔴 DESVIO DE CALIBRAÇÃO',
+    generateVisualBar(dailyScaleConf, Math.max(1, prodRecords.length), 14),
+    `Vencida/Sem Selo: ${dailyScaleNonConf}x | Tags: ${dailyScaleTags}`
+  ]);
+
+  dashboardRows.push([
+    'Temperaturas do Canhão: Conformidade Térmica',
+    `${dailyThermConf}x Conforme`,
+    dailyThermDev === 0 ? '🟢 100% EM FICHA' : `🟡 ${dailyThermDev} DESVIO(S)`,
+    generateVisualBar(dailyThermConf, Math.max(1, prodRecords.length), 14),
+    `Desvios Térmicos Registrados: ${dailyThermDev}x`
+  ]);
+
+  dashboardRows.push([
+    'Sistema de Circulação / Refrigeração',
+    `${dailyCircActive}x Ativo`,
+    dailyCircDown > 0 ? '🔴 INOPERANTE' : (dailyCircAlert > 0 ? '🟡 ALERTA PRESSÃO/FLUXO' : '🟢 CIRCULAÇÃO NORMAL'),
+    generateVisualBar(dailyCircActive, Math.max(1, prodRecords.length), 14),
+    `Alertas: ${dailyCircAlert}x | Inoperante: ${dailyCircDown}x`
+  ]);
+
+  dashboardRows.push([
+    'Embalagem, Selagem & Etiquetas Palete',
+    `${dailyLabelConf}x Etiquetas OK`,
+    (dailyLabelDev > 0 || dailySealCrit > 0) ? '🔴 DESVIO DE EMBALAGEM' : '🟢 SELAGEM CONFORME',
+    generateVisualBar(dailyLabelConf, Math.max(1, prodRecords.length), 14),
+    `Etiquetas Diverg.: ${dailyLabelDev}x | Selagem Conforme: ${dailySealConf}x | Desvio Selagem: ${dailySealWeak + dailySealBurnt + dailySealCrit}x`
+  ]);
 
   const wsDash = XLSX.utils.aoa_to_sheet(dashboardRows);
   wsDash['!cols'] = [
@@ -1003,6 +1178,8 @@ export function exportDailyReportToExcel(
     'Status do Ímã',
     'Condição Peneira / Pó',
     'Temp. Seladora',
+    'Balança Calibração',
+    'Balança Tag / Código',
     'Etiquetas & Código',
     'Qualidade Selagem',
     'Comunicado ao Líder?',
@@ -1052,6 +1229,8 @@ export function exportDailyReportToExcel(
     r.magnetStatus || '',
     r.sievePowderCondition || '',
     r.sealerTempConforming ? 'Correta' : (r.sealerTempConforming === false ? 'Incorreta' : ''),
+    r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' && r.scaleCalibrationStatus !== 'sem_etiqueta' ? 'Válida / Conforme' : `Desvio (${r.scaleCalibrationStatus || 'Incorreta'})`,
+    r.scaleTagNumber || `BAL-${r.machineId}`,
     r.labelCodesConforming ? 'Conforme' : (r.labelCodesConforming === false ? 'Divergente' : ''),
     r.sealingQuality || '',
     r.deviationReportedToLeader ? 'Sim' : 'Não',
@@ -1206,6 +1385,58 @@ export function exportPowerBIVisualExcel(
     if (r.labelCodesConforming === false) label += 1;
   }
   const maxOcorr = Math.max(1, thermal, params, sieve, magnet, seal, label);
+
+  // Auditoria Detalhada de Processo (Ficha, Ímãs, Peneira, Balança, Temperaturas, Circulação, Embalagem)
+  let sheetSame = 0; let sheetDiff = 0; let sheetNoRef = 0;
+  let magnetClean = 0; let magnetCleaned = 0; let magnetAlert = 0; let magnetCrit = 0;
+  let sieveNormal = 0; let sieveAlert = 0; let sieveBlocked = 0;
+  let scaleConf = 0; let scaleNonConf = 0;
+  const scaleTagsSet = new Set<string>();
+  let thermConf = 0; let thermDev = 0;
+  let circActive = 0; let circAlert = 0; let circDown = 0;
+  let labelConf = 0; let labelDev = 0;
+  let sealConf = 0; let sealWeak = 0; let sealBurnt = 0; let sealCrit = 0;
+
+  for (const r of filtered) {
+    if ((r.lineStatus || 'em_producao') === 'em_producao') {
+      if (r.hasPreviousReferenceSheet) {
+        if (r.parametersMatchPreviousSheet) sheetSame += 1;
+        else sheetDiff += 1;
+      } else {
+        sheetNoRef += 1;
+      }
+
+      if ((r.magnetStatus || 'limpo') === 'limpo') magnetClean += 1;
+      else if (r.magnetStatus === 'limpeza_realizada') magnetCleaned += 1;
+      else if (r.magnetStatus === 'limalha_detectada') magnetAlert += 1;
+      else if (r.magnetStatus === 'nao_conforme') magnetCrit += 1;
+
+      if ((r.sievePowderCondition || 'normal') === 'normal') sieveNormal += 1;
+      else if (r.sievePowderCondition === 'excesso_po' || r.sievePowderCondition === 'presenca_finos') sieveAlert += 1;
+      else if (r.sievePowderCondition === 'peneira_obstruida') sieveBlocked += 1;
+
+      if (r.scaleCalibrationConforming || r.scaleCalibrationStatus === 'conforme') scaleConf += 1;
+      else scaleNonConf += 1;
+
+      if (r.scaleTagNumber) scaleTagsSet.add(r.scaleTagNumber);
+
+      if (r.temperaturesConforming) thermConf += 1;
+      else thermDev += 1;
+
+      if ((r.circulationSystemStatus || 'ativo') === 'ativo') circActive += 1;
+      else if (r.circulationSystemStatus === 'inativo') circDown += 1;
+
+      if (r.labelCodesConforming) labelConf += 1;
+      else if (r.labelCodesConforming === false) labelDev += 1;
+
+      if ((r.sealingQuality || 'conforme') === 'conforme') sealConf += 1;
+      else if (r.sealingQuality === 'aberta') sealWeak += 1;
+      else if (r.sealingQuality === 'queimada') sealBurnt += 1;
+      else if (r.sealingQuality === 'defeituosa') sealCrit += 1;
+    }
+  }
+  const sheetRepeatPct = (sheetSame + sheetDiff) > 0 ? Math.round((sheetSame / (sheetSame + sheetDiff)) * 100) : 100;
+  const scaleTagsStr = Array.from(scaleTagsSet).slice(0, 4).join(', ') || 'BAL-DR01-06';
 
   // Turnos
   const shifts = [
@@ -1582,6 +1813,200 @@ export function exportPowerBIVisualExcel(
         </tr>
       </table>
 
+      <!-- 3.5 PAINEL DE AUDITORIA OPERACIONAL & QUALIDADE (POWER BI EXCEL CARDS) -->
+      <table width="100%" cellpadding="0" cellspacing="12" border="0" style="margin-bottom:16px;">
+        <tr>
+          <!-- Coluna 1: Ficha Técnica, Ímãs e Peneira -->
+          <td width="50%" bgcolor="#ffffff" style="background-color:#ffffff; border:1px solid #cbd5e1; padding:18px; vertical-align:top;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-bottom:2px solid #f1f5f9; padding-bottom:8px; margin-bottom:12px;">
+              <tr>
+                <td>
+                  <font size="3" color="#0f172a"><b>📋 Auditoria de Ficha Técnica, Ímãs & Peneira</b></font><br>
+                  <font size="1" color="#64748b">Estabilidade de parâmetros, retenção magnética e controle de pó</font>
+                </td>
+                <td align="right">
+                  <span style="background-color:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 8px; font-size:8pt; font-weight:bold;">
+                    ${sheetRepeatPct}% Repetibilidade
+                  </span>
+                </td>
+              </tr>
+            </table>
+
+            <table width="100%" cellpadding="5" cellspacing="0" border="0">
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155;">
+                  1. Ficha Atual vs Ficha Anterior:
+                </td>
+              </tr>
+              <tr>
+                <td width="48%"><font size="2" color="#059669">● Parâmetros Iguais à Ficha</font></td>
+                <td width="32%">${renderExcelBar((sheetSame / Math.max(1, sheetSame + sheetDiff)) * 100, '#059669', '#f1f5f9', 10)}</td>
+                <td width="20%" align="right"><font size="2" color="#0f172a"><b>${sheetSame} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#d97706">● Parâmetros com Desvio / Alterados</font></td>
+                <td>${renderExcelBar((sheetDiff / Math.max(1, sheetSame + sheetDiff)) * 100, '#d97706', '#f1f5f9', 10)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${sheetDiff} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="1" color="#64748b">Sem Ficha Anterior de Referência</font></td>
+                <td></td>
+                <td align="right"><font size="1" color="#64748b">${sheetNoRef} reg.</font></td>
+              </tr>
+
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155; padding-top:10px;">
+                  2. Condições dos Ímãs de Linha:
+                </td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#059669">Conforme / Limpo</font></td>
+                <td>${renderExcelBar(magnetClean > 0 ? 100 : 0, '#059669', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${magnetClean} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#2563eb">Limpeza Realizada no Turno</font></td>
+                <td>${renderExcelBar(magnetCleaned > 0 ? 100 : 0, '#2563eb', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${magnetCleaned} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#d97706">Alerta (Presença de Partículas)</font></td>
+                <td>${renderExcelBar(magnetAlert > 0 ? 100 : 0, '#d97706', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${magnetAlert} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#dc2626">Não Conforme (Contaminação Crítica)</font></td>
+                <td>${renderExcelBar(magnetCrit > 0 ? 100 : 0, '#dc2626', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${magnetCrit} reg.</b></font></td>
+              </tr>
+
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155; padding-top:10px;">
+                  3. Condição do Pó na Peneira:
+                </td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#059669">Normal / Sem Excesso</font></td>
+                <td>${renderExcelBar(sieveNormal > 0 ? 100 : 0, '#059669', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${sieveNormal} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#d97706">Alerta (Excesso de Pó / Finos)</font></td>
+                <td>${renderExcelBar(sieveAlert > 0 ? 100 : 0, '#d97706', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${sieveAlert} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#dc2626">Bloqueada / Limpeza Necessária</font></td>
+                <td>${renderExcelBar(sieveBlocked > 0 ? 100 : 0, '#dc2626', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${sieveBlocked} reg.</b></font></td>
+              </tr>
+            </table>
+          </td>
+
+          <!-- Coluna 2: Balança da Linha, Circulação, Temperaturas & Embalagem -->
+          <td width="50%" bgcolor="#ffffff" style="background-color:#ffffff; border:1px solid #cbd5e1; padding:18px; vertical-align:top;">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-bottom:2px solid #f1f5f9; padding-bottom:8px; margin-bottom:12px;">
+              <tr>
+                <td>
+                  <font size="3" color="#0f172a"><b>⚖ Balança, Circulação, Temperaturas & Selagem</b></font><br>
+                  <font size="1" color="#64748b">Calibração metrológica, integridade térmica e fechamento de sacaria</font>
+                </td>
+                <td align="right">
+                  <span style="background-color:#f0fdf4; color:#15803d; border:1px solid #bbf7d0; padding:2px 8px; font-size:8pt; font-weight:bold;">
+                    ${scaleNonConf === 0 ? 'Balanças 100% Calibradas' : `${scaleNonConf} Desvio Balança`}
+                  </span>
+                </td>
+              </tr>
+            </table>
+
+            <table width="100%" cellpadding="5" cellspacing="0" border="0">
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155;">
+                  4. Balança da Linha (Etiqueta & Tags):
+                </td>
+              </tr>
+              <tr>
+                <td width="48%"><font size="2" color="#059669">● Calibração Conforme / Válida</font></td>
+                <td width="32%">${renderExcelBar((scaleConf / Math.max(1, scaleConf + scaleNonConf)) * 100, '#059669', '#f1f5f9', 10)}</td>
+                <td width="20%" align="right"><font size="2" color="#0f172a"><b>${scaleConf} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#dc2626">● Vencida / Sem Etiqueta / Desvio</font></td>
+                <td>${renderExcelBar((scaleNonConf / Math.max(1, scaleConf + scaleNonConf)) * 100, '#dc2626', '#f1f5f9', 10)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${scaleNonConf} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="1" color="#64748b">Tags Patrimoniais Identificadas</font></td>
+                <td colspan="2" align="right"><font size="1" color="#334155"><b>${scaleTagsStr}</b></font></td>
+              </tr>
+
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155; padding-top:10px;">
+                  5. Faixas Térmicas e Temperaturas do Canhão:
+                </td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#059669">Temperaturas Conformes com Ficha</font></td>
+                <td>${renderExcelBar((thermConf / Math.max(1, thermConf + thermDev)) * 100, '#059669', '#f1f5f9', 10)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${thermConf} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#d97706">Desvios Térmicos Registrados</font></td>
+                <td>${renderExcelBar((thermDev / Math.max(1, thermConf + thermDev)) * 100, '#d97706', '#f1f5f9', 10)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${thermDev} reg.</b></font></td>
+              </tr>
+
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155; padding-top:10px;">
+                  6. Sistema de Circulação e Refrigeração:
+                </td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#059669">Circulação Ativa / Normal</font></td>
+                <td>${renderExcelBar(circActive > 0 ? 100 : 0, '#059669', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${circActive} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#d97706">Alerta de Pressão/Fluxo</font></td>
+                <td>${renderExcelBar(circAlert > 0 ? 100 : 0, '#d97706', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${circAlert} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#dc2626">Circulação Inoperante</font></td>
+                <td>${renderExcelBar(circDown > 0 ? 100 : 0, '#dc2626', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${circDown} reg.</b></font></td>
+              </tr>
+
+              <tr>
+                <td colspan="3" bgcolor="#f8fafc" style="border-bottom:1px solid #e2e8f0; font-weight:bold; font-size:9pt; color:#334155; padding-top:10px;">
+                  7. Embalagem, Selagem e Etiquetas do Palete:
+                </td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#059669">Etiquetas Palete Conformes</font></td>
+                <td>${renderExcelBar((labelConf / Math.max(1, labelConf + labelDev)) * 100, '#059669', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${labelConf} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#dc2626">Etiquetas Divergentes</font></td>
+                <td>${renderExcelBar((labelDev / Math.max(1, labelConf + labelDev)) * 100, '#dc2626', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${labelDev} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#059669">Selagem Conforme</font></td>
+                <td>${renderExcelBar(sealConf > 0 ? 100 : 0, '#059669', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${sealConf} reg.</b></font></td>
+              </tr>
+              <tr>
+                <td><font size="2" color="#d97706">Desvios Selagem (Fraca/Queimada)</font></td>
+                <td>${renderExcelBar((sealWeak + sealBurnt + sealCrit) > 0 ? 100 : 0, '#d97706', '#f1f5f9', 8)}</td>
+                <td align="right"><font size="2" color="#0f172a"><b>${sealWeak + sealBurnt + sealCrit} reg.</b></font></td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+
       <!-- 4. GRID INFERIOR (SCREENSHOT 3 & 5): MATRIZ DAS 6 EXTRUSORAS + VOLUME POR TURNO -->
       <table width="100%" cellpadding="0" cellspacing="12" border="0" style="margin-bottom:16px;">
         <tr>
@@ -1704,6 +2129,7 @@ export function exportPowerBIVisualExcel(
                   <th><font color="#ffffff">RPM</font></th>
                   <th><font color="#ffffff">Amperes</font></th>
                   <th><font color="#ffffff">Temperaturas</font></th>
+                  <th><font color="#ffffff">Balança Linha</font></th>
                   <th><font color="#ffffff">Paradas</font></th>
                   <th><font color="#ffffff">OM / Setup</font></th>
                 </tr>
@@ -1724,6 +2150,7 @@ export function exportPowerBIVisualExcel(
                     <td>${r.rpm ?? '-'}</td>
                     <td>${r.motorAmperes ?? '-'}</td>
                     <td>${r.temperaturesConforming ? 'Conforme' : 'Desvio'}</td>
+                    <td>${r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' ? `${r.scaleTagNumber || `BAL-${r.machineId}`} (OK)` : '<font color="#dc2626"><b>Desvio</b></font>'}</td>
                     <td>${r.hasStoppage ? (r.stoppageQuantity || 1) : 0}</td>
                     <td>${r.maintenanceOrderNumber || r.setupMaterial || '-'}</td>
                   </tr>
