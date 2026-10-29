@@ -268,7 +268,7 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
     <div className="space-y-6 pb-12">
       {/* Top Segmented View Switcher: Power BI vs Diário vs Mensal */}
       <div className="flex items-center justify-between flex-wrap gap-4 print:hidden">
-        <div className="inline-flex bg-slate-200/90 p-1 rounded-xl border border-slate-300">
+        <div className="inline-flex max-w-full overflow-x-auto scrollbar-none bg-slate-200/90 p-1 rounded-xl border border-slate-300">
           <button
             type="button"
             onClick={() => setReportView('powerbi')}

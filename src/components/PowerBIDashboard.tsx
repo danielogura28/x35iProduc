@@ -596,9 +596,9 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
           </div>
 
           {/* Action Buttons & Slicers */}
-          <div className="flex flex-wrap items-center gap-2.5 bg-slate-900/90 p-2.5 rounded-xl border border-slate-700/80 backdrop-blur-xs">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 bg-slate-900/90 p-2 sm:p-2.5 rounded-xl border border-slate-700/80 backdrop-blur-xs w-full lg:w-auto">
             {/* Slicer: Período Segmentado (Diário | Semanal | Mensal | Personalizado) */}
-            <div className="flex rounded-lg bg-slate-800 p-0.5 border border-slate-700 text-xs">
+            <div className="flex rounded-lg bg-slate-800 p-0.5 border border-slate-700 text-xs max-w-full overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setPeriodType('day')}
