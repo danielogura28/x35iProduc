@@ -36,7 +36,8 @@ import {
   FileCheck,
   Thermometer,
   PackageCheck,
-  RefreshCw
+  RefreshCw,
+  Timer
 } from 'lucide-react';
 import { 
   exportMonthlyReportToExcel, 
@@ -50,6 +51,12 @@ import {
   formatDateBR,
   isTimestampInRange
 } from '../utils/dateUtils';
+import {
+  formatAnalysisDuration,
+  analyzeRecordDeviations,
+  DOCUMENT_IDENTIFIER,
+  DOCUMENT_FULL_TITLE
+} from '../utils/deviationUtils';
 
 interface PowerBIDashboardProps {
   records: ProductionRecord[];
@@ -398,6 +405,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
       const latest = recs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
       const status = latest?.lineStatus || (recs.length > 0 ? 'em_producao' : 'inativa');
       const stops = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+      const deviations = latest ? analyzeRecordDeviations(latest) : [];
 
       const maxScale = 520;
       const realWidthPct = Math.min(100, Math.round((avgKgh / maxScale) * 100));
@@ -412,6 +420,9 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         status,
         stops,
         latest,
+        deviations,
+        hasDeviation: deviations.length > 0,
+        analysisDurationSeconds: latest?.analysisDurationSeconds,
         realWidthPct,
         targetTickPct
       };
@@ -635,8 +646,10 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               PP
             </div>
             <div>
-              <div className="text-[10px] font-black uppercase tracking-widest text-red-900 font-mono">
-                PETROPOL POLÍMEROS INDUSTRIAIS LTDA. • CONTROLE DE OPERAÇÕES DE EXTRUSÃO
+              <div className="text-[10px] font-black uppercase tracking-widest text-red-900 font-mono flex items-center gap-2">
+                <span>PETROPOL POLÍMEROS INDUSTRIAIS LTDA.</span>
+                <span>•</span>
+                <span className="bg-red-100 text-red-950 px-1.5 py-0.5 rounded border border-red-300 font-bold">{DOCUMENT_IDENTIFIER}</span>
               </div>
               <h1 className="text-xl font-black text-slate-950 tracking-tight">
                 RELATÓRIO GERENCIAL DE DESEMPENHO E PRODUTIVIDADE OPERACIONAL
@@ -648,6 +661,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
           </div>
           <div className="text-right text-[10px] text-slate-600 font-mono space-y-0.5">
             <div>Emissão: <strong>{new Date().toLocaleString('pt-BR')}</strong></div>
+            <div>Procedimento: <strong className="text-red-900">{DOCUMENT_IDENTIFIER}</strong></div>
             <div>Filtro de Extrusoras: <strong>{selectedMachineFilter === 'ALL' ? 'Frota Total (DR01 a DR06)' : `Extrusora ${selectedMachineFilter}`}</strong></div>
             <div>Apontamentos no Período: <strong>{filteredRecords.length}</strong></div>
             <div className="text-emerald-700 font-bold">Documento Auditado para Gestão Industrial</div>
@@ -1278,15 +1292,29 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               return (
                 <div key={f.mId} className="p-4 hover:bg-slate-50/80 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4">
                   {/* Left: Badge & Name */}
-                  <div className="flex items-center gap-3 min-w-[150px]">
-                    <div className="w-10 h-10 rounded-lg bg-[#3b0a0a] text-white font-black flex items-center justify-center font-mono text-sm shadow-inner">
+                  <div className="flex items-center gap-3 min-w-[170px]">
+                    <div className="w-10 h-10 rounded-lg bg-[#3b0a0a] text-white font-black flex items-center justify-center font-mono text-sm shadow-inner shrink-0">
                       {f.mId}
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-900 text-sm">Extrusora {f.mId}</h4>
-                      <span className={`inline-block px-2 py-0.2 rounded text-[10px] font-semibold border ${statusCfg.badgeColor}`}>
-                        {statusCfg.label}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="font-bold text-slate-900 text-sm">Extrusora {f.mId}</h4>
+                        {f.hasDeviation && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-red-600 text-white font-mono uppercase animate-pulse">
+                            Desvio
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                        <span className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-semibold border ${statusCfg.badgeColor}`}>
+                          {statusCfg.label}
+                        </span>
+                        {f.deviations && f.deviations.length > 0 && (
+                          <span className="text-[10px] text-red-700 font-semibold truncate max-w-[140px]" title={f.deviations.map(d => d.description).join(' | ')}>
+                            • {f.deviations[0].label}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1318,16 +1346,26 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* Right: Paradas (red) & Última OP */}
-                  <div className="flex items-center gap-4 text-xs shrink-0">
-                    <div className="text-right min-w-[60px]">
+                  {/* Right: Tempo de Análise, Paradas & Última OP */}
+                  <div className="flex items-center gap-3 text-xs shrink-0">
+                    {f.analysisDurationSeconds !== undefined && f.analysisDurationSeconds > 0 && (
+                      <div className="text-right min-w-[70px] hidden sm:block">
+                        <span className="text-[10px] text-slate-400 block uppercase">ANÁLISE</span>
+                        <span className="font-mono font-bold text-slate-700 flex items-center justify-end gap-1">
+                          <Timer className="w-3 h-3 text-slate-500" />
+                          {formatAnalysisDuration(f.analysisDurationSeconds)}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="text-right min-w-[55px]">
                       <span className="text-[10px] text-slate-400 block uppercase">PARADAS</span>
                       <span className={`font-mono font-bold ${f.stops > 0 ? 'text-red-700' : 'text-slate-400'}`}>
                         {f.stops}
                       </span>
                     </div>
 
-                    <div className="text-right min-w-[90px]">
+                    <div className="text-right min-w-[85px]">
                       <span className="text-[10px] text-slate-400 block uppercase">ÚLTIMA OP</span>
                       <span className="font-mono font-semibold text-slate-800 text-[11px]">
                         {f.latest?.productionOrder || 'Sem OP'}
@@ -1674,8 +1712,10 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
 
       {/* BLOCO DE ASSINATURAS E AVALIAÇÃO INDUSTRIAL PARA IMPRESSÃO / AUDITORIA */}
       <div className="hidden print:block pt-8 mt-6 border-t-2 border-slate-300">
-        <div className="text-[10px] uppercase font-bold text-slate-500 mb-6 font-mono text-center">
-          Homologação e Auditoria de Desempenho Operacional de Extrusão • PetroPol Polímeros Industriais
+        <div className="text-[10px] uppercase font-bold text-slate-500 mb-6 font-mono text-center flex items-center justify-center gap-2">
+          <span>{DOCUMENT_FULL_TITLE}</span>
+          <span>•</span>
+          <span>Homologação e Auditoria de Desempenho Operacional de Extrusão • PetroPol Polímeros Industriais</span>
         </div>
         <div className="grid grid-cols-3 gap-8 text-xs text-slate-800">
           <div className="text-center pt-8 border-t border-slate-400">
@@ -1694,6 +1734,15 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
             <div className="mt-4 text-[9px] text-slate-400 font-mono">Assinatura / Visto: _______________________</div>
           </div>
         </div>
+      </div>
+
+      {/* Rodapé Oficial da Tela do Dashboard */}
+      <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2 font-mono print:hidden">
+        <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+          {DOCUMENT_FULL_TITLE}
+        </span>
+        <span className="text-slate-400">PetroPol Polímeros • Controle e Auditoria de Processo</span>
+        <span className="text-slate-400">Tempo por Linha Rastreado Automaticamente</span>
       </div>
     </div>
   );

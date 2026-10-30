@@ -39,10 +39,12 @@ import {
   Layers,
   Activity,
   Gauge,
-  Scale
+  Scale,
+  Timer
 } from 'lucide-react';
 import { TeamManagerModal } from './TeamManagerModal';
 import { getGlobalLineStatuses } from '../utils/storage';
+import { formatAnalysisDuration, DOCUMENT_FULL_TITLE } from '../utils/deviationUtils';
 
 interface EntryFormProps {
   initialMachine?: MachineId;
@@ -92,9 +94,22 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     return globalConfig[initialMachine]?.maintenanceOrderNumber || '';
   });
 
+  // Cronômetro de Tempo Gasto na Análise da Linha
+  const [analysisStartTime, setAnalysisStartTime] = useState<number>(() => Date.now());
+  const [analysisDurationSeconds, setAnalysisDurationSeconds] = useState<number>(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAnalysisDurationSeconds(Math.max(1, Math.floor((Date.now() - analysisStartTime) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [analysisStartTime]);
+
   const handleMachineChange = (newMachine: MachineId) => {
     setMachineId(newMachine);
     setScaleTagNumber(`BAL-${newMachine}`);
+    setAnalysisStartTime(Date.now());
+    setAnalysisDurationSeconds(0);
     const globalConfig = getGlobalLineStatuses();
     const preset = globalConfig[newMachine];
     if (preset) {
@@ -454,6 +469,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 
     setErrors([]);
 
+    const recordedDuration = Math.max(1, Math.floor((Date.now() - analysisStartTime) / 1000));
     let record: ProductionRecord;
 
     if (lineStatus === 'manutencao') {
@@ -471,6 +487,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         stoppageQuantity: 1,
         stoppageReasonsList: ['Mecânica'],
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Linha sob intervenção de manutenção.',
+        analysisDurationSeconds: recordedDuration,
         photos,
       };
     } else if (lineStatus === 'setup') {
@@ -488,6 +505,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         stoppageQuantity: 1,
         stoppageReasonsList: ['Setup / Limpeza'],
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || `Setup: ${setupMaterial.trim()}`,
+        analysisDurationSeconds: recordedDuration,
         photos,
       };
     } else if (lineStatus === 'preventiva') {
@@ -503,6 +521,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         stoppageQuantity: 1,
         stoppageReasonsList: ['Mecânica'],
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Manutenção preventiva programada.',
+        analysisDurationSeconds: recordedDuration,
         photos,
       };
     } else if (lineStatus === 'inativa') {
@@ -517,6 +536,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         hasStoppage: true,
         stoppageQuantity: 0,
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Linha inativa / sem programação.',
+        analysisDurationSeconds: recordedDuration,
         photos,
       };
     } else {
@@ -594,12 +614,15 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         hasMaintenanceOrder: hasMaintenanceOrderInProd,
         maintenanceOrderNumber: hasMaintenanceOrderInProd ? maintenanceOrderNumber.trim().toUpperCase() : undefined,
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || undefined,
+        analysisDurationSeconds: recordedDuration,
         photos,
       };
     }
 
     onSaveSuccess(record);
     setSavedSuccessAlert(true);
+    setAnalysisStartTime(Date.now());
+    setAnalysisDurationSeconds(0);
     setTimeout(() => setSavedSuccessAlert(false), 4000);
   };
 
@@ -627,10 +650,23 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           <p className="text-xs text-red-200/90 mt-1 max-w-2xl">
             Inspeção completa: Ficha técnica anterior comparativa, dosadoras 01 a 04, side feeder, homogeneização DOS02, circulação e registro de paradas por quantidade e motivo.
           </p>
+          <div className="mt-2 text-[11px] font-mono font-medium text-amber-200/95 flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded bg-black/30 border border-amber-400/30">
+              {DOCUMENT_FULL_TITLE}
+            </span>
+            <span>• PetroPol Polímeros</span>
+          </div>
         </div>
-        <span className="px-3 py-1 bg-red-900 border border-red-800 rounded-lg text-xs font-mono font-medium text-red-100">
-          Linha: <strong className="text-white font-bold">{machineId}</strong>
-        </span>
+        <div className="flex flex-row md:flex-col items-center md:items-end gap-2">
+          <span className="px-3 py-1 bg-red-900 border border-red-800 rounded-lg text-xs font-mono font-medium text-red-100">
+            Linha: <strong className="text-white font-bold">{machineId}</strong>
+          </span>
+          <div className="flex items-center gap-1.5 bg-black/40 border border-amber-400/50 px-3 py-1 rounded-lg text-xs font-mono text-amber-200 shadow-inner">
+            <Timer className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <span>Tempo de Análise:</span>
+            <strong className="text-white font-bold">{formatAnalysisDuration(analysisDurationSeconds)}</strong>
+          </div>
+        </div>
       </div>
 
       {errors.length > 0 && (
@@ -2412,6 +2448,15 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           </button>
         </div>
       </form>
+
+      {/* Rodapé Padronizado de Controle de Processo */}
+      <div className="pt-4 pb-2 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2 font-mono">
+        <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+          {DOCUMENT_FULL_TITLE}
+        </span>
+        <span className="text-slate-400">PetroPol Polímeros • Controle e Garantia da Qualidade</span>
+        <span className="text-slate-400">Tempo de Análise Contabilizado Automaticamente</span>
+      </div>
     </div>
   );
 };

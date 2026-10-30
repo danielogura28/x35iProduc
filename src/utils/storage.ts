@@ -546,6 +546,8 @@ export function exportToCSV(records: ProductionRecord[]): void {
     'Qtd de Paradas',
     'Motivos das Paradas',
     'Relato Desvios',
+    'Tempo Análise (s)',
+    'Documento Referência',
     'Qtd Fotos'
   ];
 
@@ -592,6 +594,8 @@ export function exportToCSV(records: ProductionRecord[]): void {
     r.stoppageQuantity || (r.hasStoppage ? 1 : 0),
     `"${(r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || '')}"`,
     `"${r.operationalDeviationsNotes?.replace(/"/g, '""') || ''}"`,
+    r.analysisDurationSeconds ?? 0,
+    `"PE_RG_034 Analise de processo"`,
     r.photos.length
   ]);
 

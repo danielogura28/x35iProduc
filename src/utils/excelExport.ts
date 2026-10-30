@@ -17,6 +17,12 @@ import {
   STOPPAGE_REASONS_LIST,
   MachineId 
 } from '../types/production';
+import {
+  formatAnalysisDuration,
+  analyzeRecordDeviations,
+  DOCUMENT_IDENTIFIER,
+  DOCUMENT_FULL_TITLE
+} from './deviationUtils';
 
 /**
  * Gera barra gráfica visual estilo Power BI dentro de célula do Excel
@@ -122,8 +128,9 @@ export function exportMonthlyReportToExcel(
   const dashboardRows: (string | number)[][] = [
     ['═══════════════════════════════════════════════════════════════════════════════════════════════════════'],
     ['  📊 POWER BI EXECUTIVE DASHBOARD  •  PETROPOL POLÍMEROS  •  EXTRUCONTROL LINHAS DR01 A DR06'],
+    ['  Código Oficial: ' + DOCUMENT_IDENTIFIER + '  •  Garantia da Qualidade e Controle de Processo'],
     ['═══════════════════════════════════════════════════════════════════════════════════════════════════════'],
-    ['Slicers Ativos:', `Mês: ${monthLabel}`, '', 'Extrusoras:', 'DR01 a DR06 (Frota Completa)', '', 'Emissão:', new Date().toLocaleString('pt-BR')],
+    ['Slicers Ativos:', `Mês: ${monthLabel}`, '', 'Documento:', DOCUMENT_IDENTIFIER, '', 'Emissão:', new Date().toLocaleString('pt-BR')],
     ['Base Analisada:', `${monthRecords.length} apontamentos operacionais`, '', 'Status Geral:', avgProductivity >= factoryGoals.targetAverageProductivityKgh ? '🟢 OPERAÇÃO EFICIENTE' : '🟡 ALERTA DE PERFORMANCE'],
     [''],
     ['┌───────────────────────────────────────────────────────────────────────────────────────────────────┐'],
@@ -655,6 +662,10 @@ export function exportMonthlyReportToExcel(
     'Ordem de Manutenção (OM)',
     'Material em Setup',
     'Relato de Desvios Operacionais',
+    'Tempo de Análise (s)',
+    'Tempo de Análise (Formatado)',
+    'Desvios de Processo Detectados',
+    'Procedimento de Referência',
     'Qtd Evidências Fotográficas'
   ];
 
@@ -706,6 +717,10 @@ export function exportMonthlyReportToExcel(
     r.maintenanceOrderNumber || '',
     r.setupMaterial || '',
     r.operationalDeviationsNotes || '',
+    r.analysisDurationSeconds ?? 0,
+    formatAnalysisDuration(r.analysisDurationSeconds),
+    analyzeRecordDeviations(r).map(d => d.label).join('; ') || 'Conforme',
+    DOCUMENT_IDENTIFIER,
     r.photos ? r.photos.length : 0
   ]);
 
@@ -788,8 +803,9 @@ export function exportDailyReportToExcel(
   const dashboardRows: (string | number)[][] = [
     ['═══════════════════════════════════════════════════════════════════════════════════════════════════════'],
     ['  📊 POWER BI EXECUTIVE DASHBOARD DIÁRIO  •  PETROPOL POLÍMEROS  •  EXTRUCONTROL LINHAS DR01-06'],
+    ['  Código Oficial: ' + DOCUMENT_IDENTIFIER + '  •  Garantia da Qualidade e Controle de Processo'],
     ['═══════════════════════════════════════════════════════════════════════════════════════════════════════'],
-    ['Slicers Ativos:', `Data: ${dateFormatted} (${dateLongLabel})`, '', 'Frota Fabril:', 'Extrusoras DR01 a DR06', '', 'Emissão:', new Date().toLocaleString('pt-BR')],
+    ['Slicers Ativos:', `Data: ${dateFormatted} (${dateLongLabel})`, '', 'Documento:', DOCUMENT_IDENTIFIER, '', 'Emissão:', new Date().toLocaleString('pt-BR')],
     ['Base Analisada:', `${dayRecords.length} apontamentos no dia`, '', 'Balanço de Massa:', `${estimatedDayKg.toLocaleString('pt-BR')} kg (${estimatedDayTons} t)`, '', 'Status Geral:', avgProductivity >= factoryGoals.targetAverageProductivityKgh ? '🟢 OPERAÇÃO EFICIENTE' : '🟡 ALERTA DE PERFORMANCE'],
     [''],
     ['┌───────────────────────────────────────────────────────────────────────────────────────────────────┐'],
@@ -1192,6 +1208,10 @@ export function exportDailyReportToExcel(
     'Número OM',
     'Material em Setup',
     'Desvios Operacionais',
+    'Tempo de Análise (s)',
+    'Tempo de Análise (Formatado)',
+    'Desvios de Processo Detectados',
+    'Procedimento de Referência',
     'Fotos'
   ];
 
@@ -1243,6 +1263,10 @@ export function exportDailyReportToExcel(
     r.maintenanceOrderNumber || '',
     r.setupMaterial || '',
     r.operationalDeviationsNotes || '',
+    r.analysisDurationSeconds ?? 0,
+    formatAnalysisDuration(r.analysisDurationSeconds),
+    analyzeRecordDeviations(r).map(d => d.label).join('; ') || 'Conforme',
+    DOCUMENT_IDENTIFIER,
     r.photos ? r.photos.length : 0
   ]);
 
@@ -1498,11 +1522,18 @@ export function exportPowerBIVisualExcel(
       <table width="100%" cellpadding="16" cellspacing="0" border="0" bgcolor="#0b1320" style="background-color:#0b1320; color:#ffffff; border-radius:12px; margin-bottom:16px;">
         <tr>
           <td>
+            <div style="margin-bottom:6px;">
+              <span style="background-color:#7f1d1d; color:#fef08a; padding:3px 8px; font-family:monospace; font-weight:bold; font-size:8pt; border:1px solid #b91c1c; border-radius:4px;">
+                ${DOCUMENT_IDENTIFIER}
+              </span>
+              <font color="#94a3b8" size="1"> &nbsp;•&nbsp; PROCEDIMENTO OPERACIONAL PADRÃO</font>
+            </div>
             <font color="#fbbf24" size="1"><b>📊 POWER BI EXECUTIVE DASHBOARD • PETROPOL POLÍMEROS</b></font><br>
             <font color="#ffffff" size="5"><b>ExtruControl · Painel Executivo das Extrusoras (DR01 a DR06)</b></font><br>
             <font color="#94a3b8" size="2">Consolidação visual dos KPIs de vazão, conformidade técnica de ficha, matriz de frotas e ranking de operadores.</font>
             <div style="margin-top:10px; padding-top:8px; border-top:1px solid #1e293b;">
               <font color="#cbd5e1" size="2">
+                <b>Documento:</b> <font color="#fbbf24"><b>${DOCUMENT_IDENTIFIER}</b></font> &nbsp;|&nbsp;
                 <b>Slicers Ativos:</b> Período: <font color="#fbbf24"><b>${displayPeriodLabel}</b></font> &nbsp;|&nbsp;
                 Frota: <b>Extrusoras DR01 a DR06 (100% Monitorada)</b> &nbsp;|&nbsp;
                 Apontamentos: <b>${filtered.length} registros</b> &nbsp;|&nbsp;
@@ -2132,10 +2163,17 @@ export function exportPowerBIVisualExcel(
                   <th><font color="#ffffff">Balança Linha</font></th>
                   <th><font color="#ffffff">Paradas</font></th>
                   <th><font color="#ffffff">OM / Setup</font></th>
+                  <th><font color="#ffffff">Tempo Análise</font></th>
+                  <th><font color="#ffffff">Desvios de Processo</font></th>
                 </tr>
               </thead>
               <tbody>
-                ${filtered.map(r => `
+                ${filtered.map(r => {
+                  const deviations = analyzeRecordDeviations(r);
+                  const devLabel = deviations.length > 0 
+                    ? `<font color="#dc2626"><b>${deviations.map(d => d.label).join(', ')}</b></font>`
+                    : '<font color="#15803d">Conforme</font>';
+                  return `
                   <tr>
                     <td>${r.id}</td>
                     <td>${new Date(r.timestamp).toLocaleString('pt-BR')}</td>
@@ -2153,10 +2191,25 @@ export function exportPowerBIVisualExcel(
                     <td>${r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' ? `${r.scaleTagNumber || `BAL-${r.machineId}`} (OK)` : '<font color="#dc2626"><b>Desvio</b></font>'}</td>
                     <td>${r.hasStoppage ? (r.stoppageQuantity || 1) : 0}</td>
                     <td>${r.maintenanceOrderNumber || r.setupMaterial || '-'}</td>
+                    <td><b>${formatAnalysisDuration(r.analysisDurationSeconds)}</b></td>
+                    <td>${devLabel}</td>
                   </tr>
-                `).join('')}
+                `;}).join('')}
               </tbody>
             </table>
+          </td>
+        </tr>
+      </table>
+
+      <!-- RODAPÉ OFICIAL PE_RG_034 -->
+      <table width="100%" cellpadding="12" cellspacing="0" border="0" bgcolor="#0b1320" style="background-color:#0b1320; color:#ffffff; border-radius:8px; margin-top:16px;">
+        <tr>
+          <td>
+            <font size="2" color="#fbbf24"><b>${DOCUMENT_IDENTIFIER}</b></font>
+            <font size="2" color="#94a3b8"> &nbsp;•&nbsp; PetroPol Polímeros Industriais Ltda. &nbsp;•&nbsp; Gestão e Análise de Processo &nbsp;•&nbsp; DR01 a DR06</font>
+          </td>
+          <td align="right">
+            <font size="1" color="#64748b">Tempo de Inspeção e Análise Rastreado Automaticamente</font>
           </td>
         </tr>
       </table>

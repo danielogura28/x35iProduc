@@ -19,9 +19,18 @@ import {
   Layers, 
   CheckCircle2,
   AlertTriangle,
-  Zap
+  Zap,
+  Timer,
+  AlertOctagon,
+  Activity,
+  CheckCircle
 } from 'lucide-react';
 import { GlobalLineStatusModal } from './GlobalLineStatusModal';
+import { 
+  analyzeAllLinesDeviations, 
+  formatAnalysisDuration, 
+  DOCUMENT_FULL_TITLE 
+} from '../utils/deviationUtils';
 
 interface LineMonitorProps {
   records: ProductionRecord[];
@@ -62,6 +71,11 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
     return acc;
   }, 0);
 
+  const lineDeviationReports = analyzeAllLinesDeviations(records);
+  const linesWithDeviations = lineDeviationReports.filter(r => r.hasDeviation);
+  const criticalDeviationsCount = lineDeviationReports.filter(r => r.severity === 'critica').length;
+  const highDeviationsCount = lineDeviationReports.filter(r => r.severity === 'alta').length;
+
   return (
     <div className="space-y-6">
       {/* Top Banner / Summary Strip */}
@@ -77,6 +91,9 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
             <p className="text-xs text-slate-500 mt-1">
               Visão em tempo real das linhas: Produção, Manutenção, Setup, Preventiva ou Inativa
             </p>
+            <div className="mt-1 text-[11px] font-mono text-slate-400">
+              Documento: <strong className="text-slate-600">{DOCUMENT_FULL_TITLE}</strong>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -132,13 +149,148 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
         </div>
       </div>
 
+      {/* PAINEL DE GESTÃO DE DESVIOS & FALHAS DE PROCESSO (Destaque para Ajuste Operacional) */}
+      <div className={`rounded-xl border p-5 shadow-sm transition-all ${
+        linesWithDeviations.length > 0 
+          ? 'bg-gradient-to-br from-red-50/90 via-amber-50/50 to-white border-red-300 ring-1 ring-red-200' 
+          : 'bg-emerald-50/60 border-emerald-200'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold ${
+              linesWithDeviations.length > 0 ? 'bg-red-700 text-white animate-pulse' : 'bg-emerald-600 text-white'
+            }`}>
+              {linesWithDeviations.length > 0 ? <AlertOctagon className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <span>Gestão Ativa de Falhas de Processo & Desvios Operacionais</span>
+                {linesWithDeviations.length > 0 ? (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-600 text-white font-mono font-bold">
+                    {linesWithDeviations.length} {linesWithDeviations.length === 1 ? 'Linha com Desvio' : 'Linhas com Desvios'}
+                  </span>
+                ) : (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-bold">
+                    100% Conforme
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-slate-600">
+                Identificação imediata de anomalias (temperaturas, dosagem, ímãs, peneira, balança, selagem, fichas) para ajuste da liderança de processo.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs">
+            {criticalDeviationsCount > 0 && (
+              <span className="px-2.5 py-1 bg-red-100 border border-red-300 text-red-900 font-semibold rounded-md flex items-center gap-1 font-mono">
+                <span className="w-2 h-2 rounded-full bg-red-600"></span>
+                {criticalDeviationsCount} Crítica(s)
+              </span>
+            )}
+            {highDeviationsCount > 0 && (
+              <span className="px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-900 font-semibold rounded-md flex items-center gap-1 font-mono">
+                <span className="w-2 h-2 rounded-full bg-amber-600"></span>
+                {highDeviationsCount} Alta(s)
+              </span>
+            )}
+          </div>
+        </div>
+
+        {linesWithDeviations.length > 0 ? (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {linesWithDeviations.map((report) => (
+              <div 
+                key={report.machineId}
+                className="bg-white rounded-lg border border-red-200 p-3.5 shadow-xs hover:border-red-400 transition-colors flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded bg-red-900 text-white font-mono font-bold text-xs flex items-center justify-center">
+                        {report.machineId}
+                      </span>
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 block">Extrusora {report.machineId}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {report.latestRecord ? `OP: ${report.latestRecord.productionOrder || 'S/N'}` : 'Sem apontamento'}
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase font-mono ${
+                      report.severity === 'critica'
+                        ? 'bg-red-600 text-white border-red-700'
+                        : report.severity === 'alta'
+                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                        : 'bg-yellow-50 text-yellow-800 border-yellow-200'
+                    }`}>
+                      {report.severity}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5 mb-3">
+                    <span className="text-[11px] font-semibold text-slate-700 block">
+                      Desvios Identificados ({report.deviations.length}):
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {report.deviations.map((dev, idx) => (
+                        <div 
+                          key={idx}
+                          title={dev.description}
+                          className="text-[11px] px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-900 font-medium flex items-center gap-1"
+                        >
+                          <AlertTriangle className="w-3 h-3 text-red-600 shrink-0" />
+                          <span className="truncate max-w-[170px]">{dev.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {report.lastAnalysisDurationSeconds !== undefined && report.lastAnalysisDurationSeconds > 0 && (
+                    <div className="text-[11px] bg-slate-50 border border-slate-200 px-2.5 py-1 rounded flex items-center justify-between text-slate-600 font-mono mb-2">
+                      <span className="flex items-center gap-1 text-slate-500">
+                        <Timer className="w-3 h-3 text-slate-600" />
+                        Tempo da Análise:
+                      </span>
+                      <strong className="text-slate-900 font-bold">
+                        {formatAnalysisDuration(report.lastAnalysisDurationSeconds)}
+                      </strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => onSelectMachineForEntry(report.machineId)}
+                    className="flex-1 py-1.5 px-2 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 rounded transition-colors text-center cursor-pointer"
+                  >
+                    Auditar / Ajustar
+                  </button>
+                  <button
+                    onClick={() => onFilterHistoryByMachine(report.machineId)}
+                    className="py-1.5 px-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded transition-colors cursor-pointer"
+                  >
+                    Histórico
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 py-4 text-center text-xs text-emerald-800 font-medium bg-white/70 rounded-lg border border-emerald-100">
+            Nenhum desvio ou falha de processo ativo no momento. Todas as linhas auditadas estão em conformidade com o procedimento {DOCUMENT_FULL_TITLE}.
+          </div>
+        )}
+      </div>
+
       {/* Grid of the 6 Machines */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
         {MACHINE_LIST.map((machineId) => {
           const latest = getLatestRecordForMachine(machineId);
+          const lineReport = lineDeviationReports.find(r => r.machineId === machineId);
 
           let statusTheme = {
-            border: 'border-slate-200',
+            border: lineReport?.hasDeviation ? 'border-red-300 ring-2 ring-red-100' : 'border-slate-200',
             badgeBg: 'bg-slate-100 text-slate-700 border-slate-300',
             label: 'Sem apontamento',
             icon: <Clock className="w-3.5 h-3.5" />
@@ -256,6 +408,32 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                   </div>
                 )}
 
+                {/* Card Deviation Alert Strip */}
+                {lineReport && lineReport.hasDeviation && (
+                  <div className="mt-2.5 p-2 rounded-lg bg-red-50/90 border border-red-300 shadow-xs">
+                    <div className="flex items-center justify-between text-red-900 font-bold text-[11px] mb-1">
+                      <span className="flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 animate-pulse" />
+                        DESVIO DE PROCESSO ({lineReport.deviations.length})
+                      </span>
+                      <span className="uppercase text-[9px] px-1.5 py-0.5 rounded bg-red-200 text-red-950 font-mono font-bold">
+                        {lineReport.severity}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {lineReport.deviations.map((d, i) => (
+                        <span 
+                          key={i} 
+                          title={d.description}
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-red-200 text-red-800 font-medium truncate max-w-[140px]"
+                        >
+                          {d.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
 
                 {/* Content according to Line Status */}
                 {latest ? (
@@ -342,12 +520,20 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                           </div>
                         </div>
 
-                        <div className="text-xs text-slate-500 pt-1 flex items-center justify-between border-t border-slate-100">
+                        <div className="text-xs text-slate-500 pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-t border-slate-100">
                           <div>
                             <span className="font-medium text-slate-700">OP: {latest.productionOrder}</span>
                             <span className="text-slate-400 ml-1">({latest.batchNumber})</span>
                           </div>
-                          <span className="text-slate-400 text-[11px]">{dateString} às {timeAgoString}</span>
+                          <div className="flex items-center gap-2 text-slate-400 text-[11px]">
+                            {latest.analysisDurationSeconds !== undefined && latest.analysisDurationSeconds > 0 && (
+                              <span className="text-slate-700 font-mono font-medium flex items-center gap-1 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                <Timer className="w-3 h-3 text-slate-600" />
+                                {formatAnalysisDuration(latest.analysisDurationSeconds)}
+                              </span>
+                            )}
+                            <span>{dateString} às {timeAgoString}</span>
+                          </div>
                         </div>
                       </>
                     ) : latest.lineStatus === 'manutencao' ? (
@@ -440,6 +626,15 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Rodapé Padronizado PE_RG_034 */}
+      <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2 font-mono">
+        <span className="font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+          {DOCUMENT_FULL_TITLE}
+        </span>
+        <span className="text-slate-400">PetroPol Polímeros • Controle e Auditoria de Processo</span>
+        <span className="text-slate-400">Tempo de Análise Contabilizado Automaticamente</span>
       </div>
 
       {/* Global Line Status Modal */}

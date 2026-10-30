@@ -290,8 +290,8 @@ export default function App() {
 
       {/* Industrial Footer (hidden when printing) */}
       <footer className="bg-slate-900 text-slate-400 border-t border-slate-800 py-6 text-xs print:hidden mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="w-6 h-6 rounded bg-red-900 text-white flex items-center justify-center font-bold text-[10px]">
               EC
             </div>
@@ -299,15 +299,19 @@ export default function App() {
               ExtruControl
             </span>
             <span className="text-slate-600">·</span>
-            <span>Sistema Integrado de Chão de Fábrica e Controle de Extrusão (DR01 - DR06)</span>
+            <span className="px-2 py-0.5 rounded bg-red-950/80 border border-red-800/80 text-amber-200 font-mono font-bold tracking-wide">
+              PE_RG_034 Analise de processo
+            </span>
+            <span className="text-slate-600 hidden sm:inline">·</span>
+            <span className="hidden sm:inline">PetroPol Polímeros • Controle de Extrusão (DR01 - DR06)</span>
           </div>
 
-          <div className="flex items-center gap-6 text-[11px] text-slate-400">
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-[11px] text-slate-400 font-mono">
             <span>6 Linhas Extrusoras Ativas</span>
             <span className="text-slate-700">·</span>
-            <span>Capacidade até 3.000 Registros</span>
+            <span>Auditoria e Tempo de Análise Ativos</span>
             <span className="text-slate-700">·</span>
-            <span>Segurança Criptografada SHA-256</span>
+            <span>Capacidade até 3.000 Registros</span>
           </div>
         </div>
       </footer>

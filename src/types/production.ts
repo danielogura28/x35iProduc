@@ -213,6 +213,9 @@ export interface ProductionRecord {
   hasMaintenanceOrder?: boolean;
   operationalDeviationsNotes?: string;
   
+  // Tempo de Análise Gasto pelo Usuário na Linha (em segundos)
+  analysisDurationSeconds?: number;
+
   // Evidências fotográficas
   photos: PhotoAttachment[];
 }
