@@ -6,6 +6,7 @@ import { ProductionRecord, MachineId, MACHINE_LIST } from '../types/production';
 
 export interface ProcessDeviationDetail {
   type: 
+    | 'nao_analisada'
     | 'manutencao'
     | 'parada'
     | 'termico'
@@ -39,6 +40,18 @@ export interface LineDeviationReport {
  */
 export function analyzeRecordDeviations(record: ProductionRecord): ProcessDeviationDetail[] {
   const list: ProcessDeviationDetail[] = [];
+
+  // 0. Linha com Análise Impossibilitada / Não Realizada
+  if (record.lineStatus === 'nao_analisada') {
+    const shiftWillAnalyze = record.canAnalyzeInCurrentShift;
+    list.push({
+      type: 'nao_analisada',
+      label: 'Análise Não Realizada',
+      description: `Motivo: ${record.unableToAnalyzeReason || 'Condição impeditiva'}. Análise no turno: ${shiftWillAnalyze ? `SIM (Previsão: ${record.estimatedAnalysisTimeInShift || 'Durante o turno'})` : 'NÃO (Bloqueada no turno)'}`,
+      severity: shiftWillAnalyze ? 'alta' : 'critica',
+      badgeColor: 'bg-rose-700 text-white border-rose-800'
+    });
+  }
 
   // 1. Manutenção Corretiva (OM)
   if (record.lineStatus === 'manutencao' || record.hasMaintenanceOrder) {

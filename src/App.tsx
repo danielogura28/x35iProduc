@@ -18,6 +18,7 @@ import {
 import { 
   getProductionRecords, 
   saveProductionRecord, 
+  updateProductionRecord,
   deleteProductionRecord, 
   getFactoryGoals, 
   saveFactoryGoals,
@@ -47,6 +48,7 @@ export default function App() {
   const [globalLineStatuses, setGlobalLineStatuses] = useState<GlobalLineStatuses>(getGlobalLineStatuses);
   const [entryPreselectedMachine, setEntryPreselectedMachine] = useState<MachineId>('DR01');
   const [historyMachineFilter, setHistoryMachineFilter] = useState<MachineId | 'ALL'>('ALL');
+  const [editingRecord, setEditingRecord] = useState<ProductionRecord | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Estados de Segurança e Autenticação
@@ -86,6 +88,19 @@ export default function App() {
   };
 
   const handleSaveSuccess = (newRecord: ProductionRecord) => {
+    if (editingRecord) {
+      const res = updateProductionRecord(newRecord);
+      if (!res.success) {
+        showToast(res.error || 'Erro ao atualizar apontamento.');
+        return;
+      }
+      setRecords(getProductionRecords());
+      showToast(`Lançamento da linha ${newRecord.machineId} (${newRecord.productionOrder || newRecord.id}) atualizado com sucesso!`);
+      setEditingRecord(null);
+      setActiveTab('history');
+      return;
+    }
+
     const res = saveProductionRecord(newRecord);
     if (!res.success) {
       showToast(res.error || 'Erro ao salvar: limite de 3.000 registros atingido.');
@@ -95,6 +110,11 @@ export default function App() {
     setRecords(getProductionRecords());
     showToast(`Apontamento da linha ${newRecord.machineId} salvo com sucesso!`);
     setActiveTab('monitor');
+  };
+
+  const handleEditRecord = (record: ProductionRecord) => {
+    setEditingRecord(record);
+    setActiveTab('entry');
   };
 
   const handleDeleteRecord = (id: string) => {
@@ -115,8 +135,8 @@ export default function App() {
     showToast('Status operacional das 6 linhas atualizado com sucesso.');
   };
 
-
   const handleNewEntryClick = (machineId?: MachineId) => {
+    setEditingRecord(null);
     if (machineId) {
       setEntryPreselectedMachine(machineId);
     }
@@ -253,12 +273,17 @@ export default function App() {
         {activeTab === 'entry' && (
           <EntryForm
             initialMachine={entryPreselectedMachine}
+            recordToEdit={editingRecord}
             operators={operators}
             shiftLeaders={shiftLeaders}
             onUpdateOperators={handleUpdateOperators}
             onUpdateShiftLeaders={handleUpdateShiftLeaders}
             onSaveSuccess={handleSaveSuccess}
-            onCancel={() => setActiveTab('monitor')}
+            onCancel={() => {
+              const wasEditing = !!editingRecord;
+              setEditingRecord(null);
+              setActiveTab(wasEditing ? 'history' : 'monitor');
+            }}
           />
         )}
 
@@ -266,6 +291,7 @@ export default function App() {
           <HistoryTable
             records={records}
             onDeleteRecord={handleDeleteRecord}
+            onEditRecord={handleEditRecord}
             selectedMachineFilter={historyMachineFilter}
             onClearMachineFilter={() => setHistoryMachineFilter('ALL')}
             onOpenStorageManager={() => setIsStorageModalOpen(true)}

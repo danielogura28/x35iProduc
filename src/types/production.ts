@@ -14,7 +14,8 @@ export type LineOperationalStatus =
   | 'manutencao' 
   | 'setup' 
   | 'preventiva' 
-  | 'inativa';
+  | 'inativa'
+  | 'nao_analisada';
 
 export const LINE_STATUS_CONFIG: Record<LineOperationalStatus, { label: string; description: string; badgeColor: string }> = {
   em_producao: {
@@ -41,6 +42,11 @@ export const LINE_STATUS_CONFIG: Record<LineOperationalStatus, { label: string; 
     label: 'Inativa / Parada',
     description: 'Linha desligada sem programação ou sem demanda. Nenhum parâmetro extra obrigatório.',
     badgeColor: 'bg-slate-600 text-white border-slate-700'
+  },
+  nao_analisada: {
+    label: 'Não foi possível analisar',
+    description: 'Linha sem condições de inspeção/análise no momento. Informar motivo e se haverá análise no turno.',
+    badgeColor: 'bg-rose-700 text-white border-rose-800'
   }
 };
 
@@ -124,6 +130,11 @@ export interface ProductionRecord {
   
   // Status inicial obrigatório da linha
   lineStatus: LineOperationalStatus;
+  
+  // Específico para Quando Não Foi Possível Realizar a Análise
+  unableToAnalyzeReason?: string; // Motivo pelo qual não foi possível analisar
+  canAnalyzeInCurrentShift?: boolean; // Se será possível analisar ainda no turno vigente
+  estimatedAnalysisTimeInShift?: string; // Horário previsto ou condição para análise no turno
   
   // Específico para Setup
   setupMaterial?: string;
@@ -229,6 +240,9 @@ export interface FactoryMonthlyGoals {
 
 export interface GlobalLineStatusConfig {
   status: LineOperationalStatus;
+  unableToAnalyzeReason?: string;
+  canAnalyzeInCurrentShift?: boolean;
+  estimatedAnalysisTimeInShift?: string;
   setupMaterial?: string;
   maintenanceOrderNumber?: string;
   notes?: string;

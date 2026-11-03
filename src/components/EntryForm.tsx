@@ -40,7 +40,10 @@ import {
   Activity,
   Gauge,
   Scale,
-  Timer
+  Timer,
+  AlertOctagon,
+  Ban,
+  Pencil
 } from 'lucide-react';
 import { TeamManagerModal } from './TeamManagerModal';
 import { getGlobalLineStatuses } from '../utils/storage';
@@ -48,6 +51,7 @@ import { formatAnalysisDuration, DOCUMENT_FULL_TITLE } from '../utils/deviationU
 
 interface EntryFormProps {
   initialMachine?: MachineId;
+  recordToEdit?: ProductionRecord | null;
   operators: Operator[];
   shiftLeaders: ShiftLeader[];
   onUpdateOperators: (ops: Operator[]) => void;
@@ -58,6 +62,7 @@ interface EntryFormProps {
 
 export const EntryForm: React.FC<EntryFormProps> = ({
   initialMachine = 'DR01',
+  recordToEdit,
   operators,
   shiftLeaders,
   onUpdateOperators,
@@ -94,6 +99,22 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     return globalConfig[initialMachine]?.maintenanceOrderNumber || '';
   });
 
+  // Campos específicos quando NÃO FOI POSSÍVEL REALIZAR A ANÁLISE
+  const [unableToAnalyzeReason, setUnableToAnalyzeReason] = useState<string>(() => {
+    const globalConfig = getGlobalLineStatuses();
+    return globalConfig[initialMachine]?.unableToAnalyzeReason || '';
+  });
+  const [canAnalyzeInCurrentShift, setCanAnalyzeInCurrentShift] = useState<boolean | null>(() => {
+    const globalConfig = getGlobalLineStatuses();
+    return globalConfig[initialMachine]?.canAnalyzeInCurrentShift !== undefined 
+      ? globalConfig[initialMachine]?.canAnalyzeInCurrentShift! 
+      : true;
+  });
+  const [estimatedAnalysisTimeInShift, setEstimatedAnalysisTimeInShift] = useState<string>(() => {
+    const globalConfig = getGlobalLineStatuses();
+    return globalConfig[initialMachine]?.estimatedAnalysisTimeInShift || '';
+  });
+
   // Cronômetro de Tempo Gasto na Análise da Linha
   const [analysisStartTime, setAnalysisStartTime] = useState<number>(() => Date.now());
   const [analysisDurationSeconds, setAnalysisDurationSeconds] = useState<number>(0);
@@ -119,6 +140,15 @@ export const EntryForm: React.FC<EntryFormProps> = ({
       }
       if (preset.maintenanceOrderNumber) {
         setMaintenanceOrderNumber(preset.maintenanceOrderNumber);
+      }
+      if (preset.unableToAnalyzeReason) {
+        setUnableToAnalyzeReason(preset.unableToAnalyzeReason);
+      }
+      if (preset.canAnalyzeInCurrentShift !== undefined) {
+        setCanAnalyzeInCurrentShift(preset.canAnalyzeInCurrentShift);
+      }
+      if (preset.estimatedAnalysisTimeInShift) {
+        setEstimatedAnalysisTimeInShift(preset.estimatedAnalysisTimeInShift);
       }
     }
   };
@@ -220,10 +250,99 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   const [savedSuccessAlert, setSavedSuccessAlert] = useState<boolean>(false);
 
   useEffect(() => {
-    if (initialMachine) {
+    if (initialMachine && !recordToEdit) {
       setMachineId(initialMachine);
     }
-  }, [initialMachine]);
+  }, [initialMachine, recordToEdit]);
+
+  // Carregar dados quando estiver em modo de edição
+  useEffect(() => {
+    if (recordToEdit) {
+      setMachineId(recordToEdit.machineId);
+      try {
+        const d = new Date(recordToEdit.timestamp);
+        d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+        setDateTime(d.toISOString().slice(0, 16));
+      } catch {
+        // keep current date
+      }
+      setShift(recordToEdit.shift);
+      setOperatorName(recordToEdit.operatorName);
+      setShiftLeader(recordToEdit.shiftLeader);
+      setLineStatus(recordToEdit.lineStatus);
+
+      if (recordToEdit.setupMaterial) setSetupMaterial(recordToEdit.setupMaterial);
+      if (recordToEdit.maintenanceOrderNumber) setMaintenanceOrderNumber(recordToEdit.maintenanceOrderNumber);
+      if (recordToEdit.unableToAnalyzeReason) setUnableToAnalyzeReason(recordToEdit.unableToAnalyzeReason);
+      if (recordToEdit.canAnalyzeInCurrentShift !== undefined) setCanAnalyzeInCurrentShift(recordToEdit.canAnalyzeInCurrentShift);
+      if (recordToEdit.estimatedAnalysisTimeInShift) setEstimatedAnalysisTimeInShift(recordToEdit.estimatedAnalysisTimeInShift);
+
+      setProductionOrder(recordToEdit.productionOrder || '');
+      setBatchNumber(recordToEdit.batchNumber || '');
+      setProductName(recordToEdit.productName || '');
+
+      if (recordToEdit.productivityKgh !== undefined) setProductivityKgh(String(recordToEdit.productivityKgh));
+      if (recordToEdit.targetProductivityKgh !== undefined) setTargetProductivityKgh(String(recordToEdit.targetProductivityKgh));
+      if (recordToEdit.rpm !== undefined) setRpm(String(recordToEdit.rpm));
+      if (recordToEdit.motorAmperes !== undefined) setMotorAmperes(String(recordToEdit.motorAmperes));
+
+      setHasPreviousReferenceSheet(recordToEdit.hasPreviousReferenceSheet !== false);
+      if (recordToEdit.prevProductivityKgh !== undefined) setPrevProductivityKgh(String(recordToEdit.prevProductivityKgh));
+      if (recordToEdit.prevRpm !== undefined) setPrevRpm(String(recordToEdit.prevRpm));
+      if (recordToEdit.prevMotorAmperes !== undefined) setPrevMotorAmperes(String(recordToEdit.prevMotorAmperes));
+
+      setTemperaturesConforming(recordToEdit.temperaturesConforming !== false);
+      setTemperatureDeviationZones(recordToEdit.temperatureDeviationZones || '');
+
+      setParametersMatchPreviousSheet(recordToEdit.parametersMatchPreviousSheet !== false);
+      setParameterDeviationReason(recordToEdit.parameterDeviationReason || '');
+      setDopObservationsIdentified(!!recordToEdit.dopObservationsIdentified);
+      setDopObservationsDetails(recordToEdit.dopObservationsDetails || '');
+      setDeviationApprovedByLeader(recordToEdit.deviationApprovedByLeader !== false);
+      if (recordToEdit.approvingLeaderName) setApprovingLeaderName(recordToEdit.approvingLeaderName);
+
+      if (recordToEdit.dosers) setDosers(recordToEdit.dosers);
+      if (recordToEdit.dos02Homogenization) setDos02Homogenization(recordToEdit.dos02Homogenization);
+      setDos02HomogenizationNotes(recordToEdit.dos02HomogenizationNotes || '');
+
+      setHasSideFeeder(!!recordToEdit.hasSideFeeder);
+      if (recordToEdit.sideFeederCurrentRpm !== undefined) setSideFeederCurrentRpm(String(recordToEdit.sideFeederCurrentRpm));
+      if (recordToEdit.sideFeederPreviousRpm !== undefined) setSideFeederPreviousRpm(String(recordToEdit.sideFeederPreviousRpm));
+      setSideFeederConforming(recordToEdit.sideFeederConforming !== false);
+
+      if (recordToEdit.circulationSystemStatus) setCirculationSystemStatus(recordToEdit.circulationSystemStatus);
+      if (recordToEdit.magnetStatus) setMagnetStatus(recordToEdit.magnetStatus);
+      setMagnetNotes(recordToEdit.magnetNotes || '');
+      if (recordToEdit.sievePowderCondition) setSievePowderCondition(recordToEdit.sievePowderCondition);
+      setSieveNotes(recordToEdit.sieveNotes || '');
+
+      setSealerTempConforming(recordToEdit.sealerTempConforming !== false);
+      if (recordToEdit.sealerTempMeasured !== undefined) setSealerTempMeasured(String(recordToEdit.sealerTempMeasured));
+      setLabelCodesConforming(recordToEdit.labelCodesConforming !== false);
+      if (recordToEdit.sealingQuality) setSealingQuality(recordToEdit.sealingQuality);
+      setPackagingNotes(recordToEdit.packagingNotes || '');
+
+      setScaleCalibrationConforming(recordToEdit.scaleCalibrationConforming !== false);
+      if (recordToEdit.scaleCalibrationStatus) setScaleCalibrationStatus(recordToEdit.scaleCalibrationStatus);
+      setScaleCalibrationValidityDate(recordToEdit.scaleCalibrationValidityDate || '');
+      setScaleIdentificationConforming(recordToEdit.scaleIdentificationConforming !== false);
+      setScaleTagNumber(recordToEdit.scaleTagNumber || `BAL-${recordToEdit.machineId}`);
+      setScaleCheckNotes(recordToEdit.scaleCheckNotes || '');
+
+      setDeviationReportedToLeader(!!recordToEdit.deviationReportedToLeader);
+      if (recordToEdit.deviationReportTime) setDeviationReportTime(recordToEdit.deviationReportTime);
+      if (recordToEdit.deviationReportLeaderName) setDeviationReportLeaderName(recordToEdit.deviationReportLeaderName);
+      setDeviationReportLeaderNotes(recordToEdit.deviationReportLeaderNotes || '');
+
+      setHasStoppage(!!recordToEdit.hasStoppage);
+      setStoppageQuantity(String(recordToEdit.stoppageQuantity || 1));
+      if (recordToEdit.stoppageReasonsList) setStoppageReasonsList(recordToEdit.stoppageReasonsList);
+      setHasMaintenanceOrderInProd(!!recordToEdit.hasMaintenanceOrder && recordToEdit.lineStatus === 'em_producao');
+      setOperationalDeviationsNotes(recordToEdit.operationalDeviationsNotes || '');
+
+      if (recordToEdit.photos) setPhotos(recordToEdit.photos);
+    }
+  }, [recordToEdit]);
 
   // Se operadores ou líderes forem atualizados no banco, sincroniza se necessário
   useEffect(() => {
@@ -301,7 +420,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     if (!operatorName.trim()) newErrors.push('Selecione o operador responsável pela linha.');
     if (!shiftLeader.trim()) newErrors.push('Selecione o líder do turno.');
 
-    if (lineStatus === 'manutencao') {
+    if (lineStatus === 'nao_analisada') {
+      if (!unableToAnalyzeReason.trim()) {
+        newErrors.push('Informe obrigatoriamente o motivo pelo qual não foi possível realizar a análise da linha.');
+      }
+      if (canAnalyzeInCurrentShift === null) {
+        newErrors.push('Informe se será possível realizar a análise ainda no turno vigente (Selecione Sim ou Não).');
+      }
+    } else if (lineStatus === 'manutencao') {
       if (!maintenanceOrderNumber.trim()) {
         newErrors.push('Para linha em Manutenção, informe o número da Ordem de Manutenção (OM).');
       }
@@ -470,11 +596,16 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     setErrors([]);
 
     const recordedDuration = Math.max(1, Math.floor((Date.now() - analysisStartTime) / 1000));
+    const targetRecordId = recordToEdit?.id || ('rec-' + Date.now());
+    const finalDuration = recordToEdit?.analysisDurationSeconds !== undefined
+      ? recordToEdit.analysisDurationSeconds + recordedDuration
+      : recordedDuration;
+
     let record: ProductionRecord;
 
     if (lineStatus === 'manutencao') {
       record = {
-        id: 'rec-' + Date.now(),
+        id: targetRecordId,
         timestamp: new Date(dateTime).toISOString(),
         machineId,
         shift,
@@ -487,12 +618,12 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         stoppageQuantity: 1,
         stoppageReasonsList: ['Mecânica'],
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Linha sob intervenção de manutenção.',
-        analysisDurationSeconds: recordedDuration,
+        analysisDurationSeconds: finalDuration,
         photos,
       };
     } else if (lineStatus === 'setup') {
       record = {
-        id: 'rec-' + Date.now(),
+        id: targetRecordId,
         timestamp: new Date(dateTime).toISOString(),
         machineId,
         shift,
@@ -505,12 +636,12 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         stoppageQuantity: 1,
         stoppageReasonsList: ['Setup / Limpeza'],
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || `Setup: ${setupMaterial.trim()}`,
-        analysisDurationSeconds: recordedDuration,
+        analysisDurationSeconds: finalDuration,
         photos,
       };
     } else if (lineStatus === 'preventiva') {
       record = {
-        id: 'rec-' + Date.now(),
+        id: targetRecordId,
         timestamp: new Date(dateTime).toISOString(),
         machineId,
         shift,
@@ -521,12 +652,12 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         stoppageQuantity: 1,
         stoppageReasonsList: ['Mecânica'],
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Manutenção preventiva programada.',
-        analysisDurationSeconds: recordedDuration,
+        analysisDurationSeconds: finalDuration,
         photos,
       };
     } else if (lineStatus === 'inativa') {
       record = {
-        id: 'rec-' + Date.now(),
+        id: targetRecordId,
         timestamp: new Date(dateTime).toISOString(),
         machineId,
         shift,
@@ -536,13 +667,35 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         hasStoppage: true,
         stoppageQuantity: 0,
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Linha inativa / sem programação.',
-        analysisDurationSeconds: recordedDuration,
+        analysisDurationSeconds: finalDuration,
+        photos,
+      };
+    } else if (lineStatus === 'nao_analisada') {
+      const shiftPossibilityText = canAnalyzeInCurrentShift 
+        ? `SIM, prevista ainda no turno${estimatedAnalysisTimeInShift.trim() ? ` (${estimatedAnalysisTimeInShift.trim()})` : ''}`
+        : 'NÃO será possível realizar neste turno vigente';
+      record = {
+        id: targetRecordId,
+        timestamp: new Date(dateTime).toISOString(),
+        machineId,
+        shift,
+        operatorName,
+        shiftLeader,
+        lineStatus: 'nao_analisada',
+        unableToAnalyzeReason: unableToAnalyzeReason.trim(),
+        canAnalyzeInCurrentShift: canAnalyzeInCurrentShift === true,
+        estimatedAnalysisTimeInShift: estimatedAnalysisTimeInShift.trim() || undefined,
+        hasStoppage: true,
+        stoppageQuantity: 1,
+        stoppageReasonsList: ['Outro'],
+        operationalDeviationsNotes: `Análise impossibilitada: ${unableToAnalyzeReason.trim()} | Reanálise no turno: ${shiftPossibilityText}${operationalDeviationsNotes.trim() ? ` | Obs: ${operationalDeviationsNotes.trim()}` : ''}`,
+        analysisDurationSeconds: finalDuration,
         photos,
       };
     } else {
       // em_producao
       record = {
-        id: 'rec-' + Date.now(),
+        id: targetRecordId,
         timestamp: new Date(dateTime).toISOString(),
         machineId,
         shift,
@@ -614,7 +767,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         hasMaintenanceOrder: hasMaintenanceOrderInProd,
         maintenanceOrderNumber: hasMaintenanceOrderInProd ? maintenanceOrderNumber.trim().toUpperCase() : undefined,
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || undefined,
-        analysisDurationSeconds: recordedDuration,
+        analysisDurationSeconds: finalDuration,
         photos,
       };
     }
@@ -668,6 +821,36 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           </div>
         </div>
       </div>
+
+      {recordToEdit && (
+        <div className="bg-amber-50 border-2 border-amber-400 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <Pencil className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-xs text-amber-950 uppercase tracking-wide">
+                  Modo de Edição / Retificação de Lançamento
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-200 text-amber-900 font-bold">
+                  {recordToEdit.id}
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Você está corrigindo dados da extrusora <strong>{machineId}</strong> ({recordToEdit.productionOrder || recordToEdit.batchNumber || 'Sem OP'}). Altere qualquer campo necessário e clique em salvar para registrar as correções.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="self-start sm:self-auto px-3.5 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-900 cursor-pointer transition-colors shadow-xs"
+          >
+            Cancelar Edição
+          </button>
+        </div>
+      )}
 
       {errors.length > 0 && (
         <div className="bg-red-50 border border-red-300 rounded-xl p-4 text-red-800 text-sm">
@@ -753,7 +936,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                 Padrão Global: <strong className="text-slate-800">{LINE_STATUS_CONFIG[getGlobalLineStatuses()[machineId]?.status || 'em_producao']?.label}</strong>
               </span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
               <button
                 type="button"
                 onClick={() => setLineStatus('em_producao')}
@@ -768,7 +951,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                   Em Produção
                 </span>
                 <p className="text-[11px] text-slate-500 mt-2">
-                  Linha operando normalmente. Seguir com a coleta completa.
+                  Operando normalmente. Coleta completa.
                 </p>
               </button>
 
@@ -786,7 +969,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                   Manutenção
                 </span>
                 <p className="text-[11px] text-slate-500 mt-2">
-                  Intervenção corretiva. Informar apenas o <strong>Número da OM</strong>.
+                  Intervenção corretiva. Requer <strong>OM</strong>.
                 </p>
               </button>
 
@@ -804,7 +987,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                   Setup
                 </span>
                 <p className="text-[11px] text-slate-500 mt-2">
-                  Troca de resina/molde. Informar o <strong>Material em setup</strong>.
+                  Troca de resina/molde. Requer <strong>material</strong>.
                 </p>
               </button>
 
@@ -822,7 +1005,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                   Preventiva
                 </span>
                 <p className="text-[11px] text-slate-500 mt-2">
-                  Preventiva programada. <strong>Não exige parâmetros</strong>.
+                  Programada. <strong>Sem parâmetros</strong>.
                 </p>
               </button>
 
@@ -840,7 +1023,25 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                   Inativa
                 </span>
                 <p className="text-[11px] text-slate-500 mt-2">
-                  Sem programação. <strong>Não exige parâmetros</strong>.
+                  Sem programação no turno.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLineStatus('nao_analisada')}
+                className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  lineStatus === 'nao_analisada'
+                    ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-400 shadow-xs'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                <span className="font-bold text-xs text-rose-900 flex items-center gap-1.5">
+                  <Ban className="w-3.5 h-3.5 text-rose-600" />
+                  Não Analisada
+                </span>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Análise impossibilitada. Requer <strong>motivo</strong> e <strong>previsão</strong>.
                 </p>
               </button>
             </div>
@@ -1074,6 +1275,163 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                 value={operationalDeviationsNotes}
                 onChange={(e) => setOperationalDeviationsNotes(e.target.value)}
                 className="w-full text-xs bg-white border border-slate-300 rounded p-2 focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* STATUS: NÃO FOI POSSÍVEL REALIZAR A ANÁLISE                    */}
+        {/* ============================================================== */}
+        {lineStatus === 'nao_analisada' && (
+          <div className="bg-rose-50/70 rounded-xl border border-rose-300 p-5 shadow-xs space-y-4">
+            <div className="flex items-center gap-2 border-b border-rose-200 pb-3">
+              <Ban className="w-5 h-5 text-rose-700" />
+              <div>
+                <h3 className="text-sm font-bold text-rose-950 uppercase tracking-wide flex items-center gap-2">
+                  <span>Análise Impossibilitada no Momento - Linha {machineId}</span>
+                  <span className="text-[10px] bg-rose-200 text-rose-900 px-2 py-0.5 rounded font-mono font-bold">
+                    STATUS OPERACIONAL
+                  </span>
+                </h3>
+                <p className="text-xs text-rose-800">
+                  Documente o motivo pelo qual a análise não pôde ser executada e informe se a inspeção será realizada ainda no turno atual.
+                </p>
+              </div>
+            </div>
+
+            {/* Motivo Obrigatório */}
+            <div>
+              <label className="block text-xs font-bold text-rose-950 mb-1">
+                Motivo pelo qual não foi possível realizar a análise: <span className="text-red-600">*</span>
+              </label>
+
+              {/* Botões Rápidos de Motivo */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {[
+                  'Linha parada por quebra mecânica / elétrica',
+                  'Aguardando liberação de matéria-prima / insumo',
+                  'Setup prolongado sem alimentação / dosagem',
+                  'Teste restrito de Engenharia / P&D',
+                  'Intervenção de segurança / Bloqueio LOTO',
+                  'Falta de operador no posto no momento'
+                ].map((reasonText) => (
+                  <button
+                    key={reasonText}
+                    type="button"
+                    onClick={() => setUnableToAnalyzeReason(reasonText)}
+                    className="text-[11px] px-2.5 py-1 rounded-md bg-white hover:bg-rose-100 border border-rose-300 text-rose-900 font-medium transition-colors cursor-pointer"
+                  >
+                    + {reasonText}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                rows={3}
+                placeholder="Descreva detalhadamente a condição que impediu a coleta e análise dos parâmetros..."
+                value={unableToAnalyzeReason}
+                onChange={(e) => setUnableToAnalyzeReason(e.target.value)}
+                className="w-full text-xs font-medium bg-white border border-rose-300 rounded-lg p-3 focus:ring-2 focus:ring-rose-600 focus:outline-none shadow-xs"
+                required
+                autoFocus
+              />
+            </div>
+
+            {/* PERGUNTA OBRIGATÓRIA: Será possível realizar ainda no turno? */}
+            <div className="bg-white rounded-lg border border-rose-200 p-4 space-y-3">
+              <label className="block text-xs font-bold text-slate-900">
+                Será possível realizar a análise ainda no turno vigente? <span className="text-red-600">*</span>
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCanAnalyzeInCurrentShift(true)}
+                  className={`p-3 rounded-lg border text-left cursor-pointer transition-all flex items-start gap-2.5 ${
+                    canAnalyzeInCurrentShift === true
+                      ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-400'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className={`w-4 h-4 mt-0.5 rounded-full border flex items-center justify-center shrink-0 ${
+                    canAnalyzeInCurrentShift === true ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-400'
+                  }`}>
+                    {canAnalyzeInCurrentShift === true && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                  </span>
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 block">
+                      SIM, será possível analisar neste turno
+                    </span>
+                    <span className="text-[11px] text-slate-500 block mt-0.5">
+                      A linha será reinspecionada assim que liberada dentro do turno vigente.
+                    </span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCanAnalyzeInCurrentShift(false)}
+                  className={`p-3 rounded-lg border text-left cursor-pointer transition-all flex items-start gap-2.5 ${
+                    canAnalyzeInCurrentShift === false
+                      ? 'bg-rose-50 border-rose-500 ring-2 ring-rose-400'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className={`w-4 h-4 mt-0.5 rounded-full border flex items-center justify-center shrink-0 ${
+                    canAnalyzeInCurrentShift === false ? 'border-rose-600 bg-rose-600 text-white' : 'border-slate-400'
+                  }`}>
+                    {canAnalyzeInCurrentShift === false && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                  </span>
+                  <div>
+                    <span className="font-bold text-xs text-rose-950 block">
+                      NÃO, análise impossibilitada para o turno
+                    </span>
+                    <span className="text-[11px] text-slate-500 block mt-0.5">
+                      A linha permanecerá sem análise durante todo o turno vigente.
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Se SIM: campo para previsão */}
+              {canAnalyzeInCurrentShift === true && (
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Horário Previsto ou Condição de Retomada no Turno (Opcional):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Previsão de início às 11:30 ou após troca do pacote de telas"
+                    value={estimatedAnalysisTimeInShift}
+                    onChange={(e) => setEstimatedAnalysisTimeInShift(e.target.value)}
+                    className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
+              {/* Se NÃO: aviso de desvio */}
+              {canAnalyzeInCurrentShift === false && (
+                <div className="p-2.5 rounded bg-rose-100 border border-rose-300 text-rose-900 text-xs flex items-center gap-2">
+                  <AlertOctagon className="w-4 h-4 shrink-0 text-rose-700" />
+                  <span>
+                    <strong>Atenção da Liderança:</strong> O registro será marcado com <strong>desvio crítico</strong> no painel de gestão para justificar a ausência de análise neste turno.
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Observações Opcionais */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Observações Complementares / Ações Imediatas (Opcional):
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Comunicado líder de turno Fernando Rocha via rádio..."
+                value={operationalDeviationsNotes}
+                onChange={(e) => setOperationalDeviationsNotes(e.target.value)}
+                className="w-full text-xs bg-white border border-rose-200 rounded-lg p-2.5 focus:ring-2 focus:ring-rose-500 focus:outline-none"
               />
             </div>
           </div>
@@ -2435,16 +2793,32 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 
           <button
             type="submit"
-            className="w-full sm:w-auto px-8 py-3 text-sm font-bold text-white bg-red-800 hover:bg-red-900 rounded-lg shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+            className={`w-full sm:w-auto px-8 py-3 text-sm font-bold text-white rounded-lg shadow-sm flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+              recordToEdit
+                ? 'bg-amber-600 hover:bg-amber-700'
+                : lineStatus === 'nao_analisada'
+                ? 'bg-rose-800 hover:bg-rose-900'
+                : 'bg-red-800 hover:bg-red-900'
+            }`}
           >
-            <Save className="w-4 h-4" />
-            <span>
-              {lineStatus === 'manutencao' && 'Salvar Apontamento de Manutenção (OM)'}
-              {lineStatus === 'setup' && 'Salvar Apontamento de Setup'}
-              {lineStatus === 'preventiva' && 'Registrar Linha em Preventiva'}
-              {lineStatus === 'inativa' && 'Registrar Linha Inativa'}
-              {lineStatus === 'em_producao' && 'Salvar Apontamento Operacional Completo'}
-            </span>
+            {recordToEdit ? (
+              <>
+                <Pencil className="w-4 h-4" />
+                <span>Salvar Alterações no Lançamento ({recordToEdit.machineId})</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>
+                  {lineStatus === 'manutencao' && 'Salvar Apontamento de Manutenção (OM)'}
+                  {lineStatus === 'setup' && 'Salvar Apontamento de Setup'}
+                  {lineStatus === 'preventiva' && 'Registrar Linha em Preventiva'}
+                  {lineStatus === 'inativa' && 'Registrar Linha Inativa'}
+                  {lineStatus === 'nao_analisada' && 'Salvar Registro: Análise Impossibilitada no Momento'}
+                  {lineStatus === 'em_producao' && 'Salvar Apontamento Operacional Completo'}
+                </span>
+              </>
+            )}
           </button>
         </div>
       </form>

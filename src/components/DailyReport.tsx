@@ -112,6 +112,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
     const maintenanceCount = dayRecords.filter(r => r.lineStatus === 'manutencao' || r.hasMaintenanceOrder).length;
     const setupCount = dayRecords.filter(r => r.lineStatus === 'setup').length;
     const preventiveCount = dayRecords.filter(r => r.lineStatus === 'preventiva').length;
+    const notAnalyzedCount = dayRecords.filter(r => r.lineStatus === 'nao_analisada').length;
     const reportedToLeaderCount = dayRecords.filter(r => r.deviationReportedToLeader).length;
 
     // 1. Auditoria Ficha Atual vs Anterior
@@ -175,6 +176,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
       maintenanceCount,
       setupCount,
       preventiveCount,
+      notAnalyzedCount,
       reportedToLeaderCount,
       // Indicadores detalhados solicitados
       sameAsPrevSheet,
@@ -401,7 +403,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
             <span className="text-xs font-semibold text-slate-500">parada(s)</span>
           </div>
           <span className="text-[11px] text-slate-400 block mt-0.5">
-            {metrics.maintenanceCount} OM(s) • {metrics.setupCount} Setup(s) • {metrics.reportedToLeaderCount} alinhados
+            {metrics.maintenanceCount} OM(s) • {metrics.setupCount} Setup(s) • {metrics.notAnalyzedCount > 0 ? `${metrics.notAnalyzedCount} Não Analisada(s) • ` : ''}{metrics.reportedToLeaderCount} alinhados
           </span>
         </div>
       </div>

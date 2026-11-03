@@ -441,6 +441,18 @@ export function saveProductionRecord(record: ProductionRecord): { success: boole
   return { success: true };
 }
 
+export function updateProductionRecord(record: ProductionRecord): { success: boolean; error?: string } {
+  const current = getProductionRecords();
+  const index = current.findIndex(r => r.id === record.id);
+  if (index === -1) {
+    return saveProductionRecord(record);
+  }
+  const updated = [...current];
+  updated[index] = record;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  return { success: true };
+}
+
 export function deleteProductionRecord(id: string): void {
   const current = getProductionRecords();
   const updated = current.filter(r => r.id !== id);
@@ -511,6 +523,9 @@ export function exportToCSV(records: ProductionRecord[]): void {
     'Turno',
     'Operador',
     'Líder',
+    'Motivo Não Analisada',
+    'Reanálise no Turno?',
+    'Previsão no Turno',
     'Material em Setup',
     'Número OM',
     'OP',
@@ -559,6 +574,9 @@ export function exportToCSV(records: ProductionRecord[]): void {
     `"${r.shift}"`,
     `"${r.operatorName}"`,
     `"${r.shiftLeader}"`,
+    `"${r.unableToAnalyzeReason?.replace(/"/g, '""') || ''}"`,
+    r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
+    `"${r.estimatedAnalysisTimeInShift?.replace(/"/g, '""') || ''}"`,
     `"${r.setupMaterial || ''}"`,
     `"${r.maintenanceOrderNumber || ''}"`,
     `"${r.productionOrder || ''}"`,

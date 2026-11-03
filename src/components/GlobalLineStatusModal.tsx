@@ -16,7 +16,8 @@ import {
   Sparkles,
   Zap,
   Save,
-  RotateCcw
+  RotateCcw,
+  Ban
 } from 'lucide-react';
 import { setAllLinesStatusGlobally, saveGlobalLineStatuses } from '../utils/storage';
 
@@ -56,12 +57,26 @@ export const GlobalLineStatusModal: React.FC<GlobalLineStatusModalProps> = ({
     }));
   };
 
-  const handleFieldChange = (machineId: MachineId, field: 'setupMaterial' | 'maintenanceOrderNumber' | 'notes', value: string) => {
+  const handleFieldChange = (
+    machineId: MachineId, 
+    field: 'setupMaterial' | 'maintenanceOrderNumber' | 'notes' | 'unableToAnalyzeReason' | 'estimatedAnalysisTimeInShift', 
+    value: string
+  ) => {
     setStatuses(prev => ({
       ...prev,
       [machineId]: {
         ...prev[machineId],
         [field]: value
+      }
+    }));
+  };
+
+  const handleShiftFeasibilityChange = (machineId: MachineId, canAnalyze: boolean) => {
+    setStatuses(prev => ({
+      ...prev,
+      [machineId]: {
+        ...prev[machineId],
+        canAnalyzeInCurrentShift: canAnalyze
       }
     }));
   };
@@ -145,7 +160,7 @@ export const GlobalLineStatusModal: React.FC<GlobalLineStatusModalProps> = ({
                   </div>
 
                   {/* Status Buttons */}
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 flex-1 max-w-2xl">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 flex-1 max-w-3xl">
                     <button
                       type="button"
                       onClick={() => handleLineStatusChange(mId, 'em_producao')}
@@ -210,10 +225,23 @@ export const GlobalLineStatusModal: React.FC<GlobalLineStatusModalProps> = ({
                       <PowerOff className="w-3.5 h-3.5 shrink-0" />
                       <span>Inativa</span>
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleLineStatusChange(mId, 'nao_analisada')}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                        statusKey === 'nao_analisada'
+                          ? 'bg-rose-700 text-white border-rose-800 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-rose-50 hover:text-rose-900'
+                      }`}
+                    >
+                      <Ban className="w-3.5 h-3.5 shrink-0" />
+                      <span>Não Analisada</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Sub-inputs when Setup or Maintenance is chosen */}
+                {/* Sub-inputs when Setup or Maintenance or Não Analisada is chosen */}
                 {statusKey === 'setup' && (
                   <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-2">
                     <span className="text-xs font-semibold text-amber-900 shrink-0">
@@ -248,6 +276,52 @@ export const GlobalLineStatusModal: React.FC<GlobalLineStatusModalProps> = ({
                       onChange={(e) => handleFieldChange(mId, 'notes', e.target.value)}
                       className="flex-1 w-full text-xs px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-hidden focus:ring-2 focus:ring-red-500"
                     />
+                  </div>
+                )}
+
+                {statusKey === 'nao_analisada' && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2 bg-rose-50/50 p-2.5 rounded-lg border border-rose-200">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                      <span className="text-xs font-semibold text-rose-950 shrink-0">
+                        Motivo da impossibilidade:
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Ex: Aguardando liberação de insumo / Máquina em quebra..."
+                        value={current.unableToAnalyzeReason || ''}
+                        onChange={(e) => handleFieldChange(mId, 'unableToAnalyzeReason', e.target.value)}
+                        className="flex-1 w-full text-xs px-3 py-1.5 rounded-lg border border-rose-300 focus:outline-hidden focus:ring-2 focus:ring-rose-500 bg-white"
+                      />
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pt-1 border-t border-rose-200/60">
+                      <span className="text-xs font-semibold text-slate-800">
+                        Será possível analisar ainda neste turno?
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleShiftFeasibilityChange(mId, true)}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer border transition-colors ${
+                            current.canAnalyzeInCurrentShift !== false
+                              ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          Sim (No Turno)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleShiftFeasibilityChange(mId, false)}
+                          className={`px-2.5 py-1 rounded text-xs font-semibold cursor-pointer border transition-colors ${
+                            current.canAnalyzeInCurrentShift === false
+                              ? 'bg-rose-700 text-white border-rose-800 shadow-xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          Não (Impossibilitada)
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

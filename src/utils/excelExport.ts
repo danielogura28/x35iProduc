@@ -622,6 +622,9 @@ export function exportMonthlyReportToExcel(
     'Turno',
     'Operador',
     'Líder Responsável',
+    'Motivo Não Analisada',
+    'Reanálise no Turno?',
+    'Previsão no Turno',
     'OP',
     'Lote',
     'Produto / Composto',
@@ -677,6 +680,9 @@ export function exportMonthlyReportToExcel(
     r.shift,
     r.operatorName,
     r.shiftLeader,
+    r.unableToAnalyzeReason || '',
+    r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
+    r.estimatedAnalysisTimeInShift || '',
     r.productionOrder || '',
     r.batchNumber || '',
     r.productName || '',
@@ -1095,6 +1101,7 @@ export function exportDailyReportToExcel(
     r.hasStoppage || 
     r.lineStatus === 'manutencao' || 
     r.lineStatus === 'setup' || 
+    r.lineStatus === 'nao_analisada' ||
     !r.temperaturesConforming || 
     !r.parametersMatchPreviousSheet ||
     r.deviationReportedToLeader ||
@@ -1110,7 +1117,10 @@ export function exportDailyReportToExcel(
       let eventType = 'Desvio Operacional';
       let details = r.operationalDeviationsNotes || '';
 
-      if (r.lineStatus === 'manutencao') {
+      if (r.lineStatus === 'nao_analisada') {
+        eventType = 'Análise Impossibilitada';
+        details = `Motivo: ${r.unableToAnalyzeReason || 'Não detalhado'} | Reanálise no turno: ${r.canAnalyzeInCurrentShift ? `SIM (${r.estimatedAnalysisTimeInShift || 'prevista'})` : 'NÃO'}`;
+      } else if (r.lineStatus === 'manutencao') {
         eventType = `Manutenção (OM: ${r.maintenanceOrderNumber || 'S/N'})`;
         details = r.operationalDeviationsNotes || 'Intervenção técnica corretiva';
       } else if (r.lineStatus === 'setup') {
@@ -1168,6 +1178,9 @@ export function exportDailyReportToExcel(
     'Turno',
     'Operador',
     'Líder do Turno',
+    'Motivo Não Analisada',
+    'Reanálise no Turno?',
+    'Previsão no Turno',
     'OP',
     'Lote',
     'Produto / Composto',
@@ -1223,6 +1236,9 @@ export function exportDailyReportToExcel(
     r.shift,
     r.operatorName,
     r.shiftLeader,
+    r.unableToAnalyzeReason || '',
+    r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
+    r.estimatedAnalysisTimeInShift || '',
     r.productionOrder || '',
     r.batchNumber || '',
     r.productName || '',

@@ -63,6 +63,7 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
   const maintenanceCount = machineLatestMap.filter(m => m.record && (m.record.lineStatus === 'manutencao' || m.record.hasMaintenanceOrder)).length;
   const setupCount = machineLatestMap.filter(m => m.record && m.record.lineStatus === 'setup').length;
   const inactiveOrPrevCount = machineLatestMap.filter(m => m.record && (m.record.lineStatus === 'preventiva' || m.record.lineStatus === 'inativa')).length;
+  const notAnalyzedCount = machineLatestMap.filter(m => m.record && m.record.lineStatus === 'nao_analisada').length;
 
   const totalCurrentOutput = machineLatestMap.reduce((acc, m) => {
     if (m.record && m.record.lineStatus === 'em_producao' && !m.record.hasStoppage) {
@@ -89,14 +90,14 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Visão em tempo real das linhas: Produção, Manutenção, Setup, Preventiva ou Inativa
+              Visão em tempo real das linhas: Produção, Manutenção, Setup, Preventiva, Inativa ou Análise Impossibilitada
             </p>
             <div className="mt-1 text-[11px] font-mono text-slate-400">
               Documento: <strong className="text-slate-600">{DOCUMENT_FULL_TITLE}</strong>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 text-xs">
             <div className="px-3 py-2 bg-emerald-50/70 border border-emerald-200 rounded-lg">
               <span className="text-emerald-800 block text-[11px] font-medium">Em Produção</span>
               <span className="text-base font-bold text-emerald-900 font-mono tabular-nums">
@@ -115,6 +116,13 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
               <span className="text-amber-800 block text-[11px] font-medium">Em Setup</span>
               <span className="text-base font-bold text-amber-900 font-mono tabular-nums">
                 {setupCount} <span className="text-xs font-normal text-slate-500">linhas</span>
+              </span>
+            </div>
+
+            <div className="px-3 py-2 bg-rose-50/80 border border-rose-300 rounded-lg">
+              <span className="text-rose-900 block text-[11px] font-medium">Não Analisada</span>
+              <span className="text-base font-bold text-rose-900 font-mono tabular-nums">
+                {notAnalyzedCount} <span className="text-xs font-normal text-slate-500">linhas</span>
               </span>
             </div>
 
@@ -342,6 +350,13 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                 label: 'Inativa / Parada',
                 icon: <PowerOff className="w-3.5 h-3.5 text-slate-600" />
               };
+            } else if (status === 'nao_analisada') {
+              statusTheme = {
+                border: 'border-rose-400 ring-2 ring-rose-200 bg-rose-50/20',
+                badgeBg: 'bg-rose-100 text-rose-900 border-rose-300',
+                label: 'Análise Impossibilitada',
+                icon: <AlertOctagon className="w-3.5 h-3.5 text-rose-700" />
+              };
             }
           }
 
@@ -383,6 +398,8 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                             ? 'Rotina Preventiva'
                             : latest.lineStatus === 'inativa'
                             ? 'Sem Programação'
+                            : latest.lineStatus === 'nao_analisada'
+                            ? `Não analisada: ${latest.unableToAnalyzeReason || 'Impossibilitada'}`
                             : (latest.productName || 'Composto Polimérico')
                         ) : 'Aguardando apontamento'}
                       </p>
@@ -577,6 +594,42 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                           </span>
                         )}
                         <div className="text-[11px] text-amber-800 pt-1 border-t border-amber-200 flex justify-between">
+                          <span>Operador: <strong>{latest.operatorName}</strong></span>
+                          <span>{timeAgoString}</span>
+                        </div>
+                      </div>
+                    ) : latest.lineStatus === 'nao_analisada' ? (
+                      /* When Analysis Was Not Possible */
+                      <div className="bg-rose-50 border border-rose-300 rounded-lg p-3 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-rose-900 font-bold uppercase flex items-center gap-1.5">
+                            <AlertOctagon className="w-4 h-4 text-rose-700 shrink-0" />
+                            Análise Impossibilitada
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            latest.canAnalyzeInCurrentShift 
+                              ? 'bg-emerald-100 text-emerald-900 border-emerald-300' 
+                              : 'bg-rose-200 text-rose-950 border-rose-300'
+                          }`}>
+                            {latest.canAnalyzeInCurrentShift ? 'Reanálise no turno: SIM' : 'Reanálise no turno: NÃO'}
+                          </span>
+                        </div>
+                        <div className="bg-white p-2.5 rounded border border-rose-200 text-rose-950 text-[11px] space-y-1">
+                          <div>
+                            <strong className="text-rose-900">Motivo:</strong> {latest.unableToAnalyzeReason || 'Não detalhado'}
+                          </div>
+                          {latest.canAnalyzeInCurrentShift && latest.estimatedAnalysisTimeInShift && (
+                            <div className="text-emerald-800 font-medium">
+                              <strong>Previsão de Retomada:</strong> {latest.estimatedAnalysisTimeInShift}
+                            </div>
+                          )}
+                          {!latest.canAnalyzeInCurrentShift && (
+                            <div className="text-rose-700 font-semibold text-[10px]">
+                              Sem previsão de inspeção para o turno atual.
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-rose-800 pt-1 border-t border-rose-200 flex justify-between">
                           <span>Operador: <strong>{latest.operatorName}</strong></span>
                           <span>{timeAgoString}</span>
                         </div>

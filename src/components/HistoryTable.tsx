@@ -21,13 +21,16 @@ import {
   CalendarClock, 
   PowerOff,
   HardDrive,
-  X 
+  X,
+  Ban,
+  Pencil
 } from 'lucide-react';
 import { MAX_STORAGE_RECORDS } from '../utils/storage';
 
 interface HistoryTableProps {
   records: ProductionRecord[];
   onDeleteRecord: (id: string) => void;
+  onEditRecord?: (record: ProductionRecord) => void;
   selectedMachineFilter?: MachineId | 'ALL';
   onClearMachineFilter?: () => void;
   onOpenStorageManager?: () => void;
@@ -36,6 +39,7 @@ interface HistoryTableProps {
 export const HistoryTable: React.FC<HistoryTableProps> = ({
   records,
   onDeleteRecord,
+  onEditRecord,
   selectedMachineFilter = 'ALL',
   onClearMachineFilter,
   onOpenStorageManager
@@ -270,6 +274,12 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                             <span>Inativa</span>
                           </span>
                         )}
+                        {status === 'nao_analisada' && (
+                          <span className="px-2 py-1 rounded text-[11px] font-semibold bg-rose-100 text-rose-900 border border-rose-300 flex items-center gap-1 w-fit">
+                            <Ban className="w-3 h-3 text-rose-600" />
+                            <span>Não Analisada</span>
+                          </span>
+                        )}
                       </td>
 
                       <td className="py-3 px-3 whitespace-nowrap">
@@ -292,6 +302,15 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                               {r.setupMaterial}
                             </span>
                             {r.productionOrder && <span className="text-[10px] text-slate-400 font-mono">Próx OP: {r.productionOrder}</span>}
+                          </div>
+                        ) : status === 'nao_analisada' ? (
+                          <div>
+                            <span className="font-semibold text-rose-900 block truncate text-xs" title={r.unableToAnalyzeReason}>
+                              {r.unableToAnalyzeReason || 'Análise impossibilitada'}
+                            </span>
+                            <span className={`text-[10px] font-semibold block ${r.canAnalyzeInCurrentShift ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {r.canAnalyzeInCurrentShift ? `Previsão turno: ${r.estimatedAnalysisTimeInShift || 'Sim'}` : 'Não analisada no turno'}
+                            </span>
                           </div>
                         ) : status === 'em_producao' ? (
                           <div>
@@ -378,6 +397,16 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                           >
                             <Eye className="w-4 h-4" />
                           </button>
+
+                          {onEditRecord && (
+                            <button
+                              onClick={() => onEditRecord(r)}
+                              className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded transition-colors cursor-pointer"
+                              title="Editar lançamento / Corrigir dados"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
 
                           <button
                             onClick={() => {
@@ -487,6 +516,44 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                     <p className="text-xs text-amber-800 pt-2 border-t border-amber-200">
                       <strong>Observações:</strong> {activeRecordForModal.operationalDeviationsNotes}
                     </p>
+                  )}
+                </div>
+              )}
+
+              {/* Se Não Foi Possível Analisar */}
+              {activeRecordForModal.lineStatus === 'nao_analisada' && (
+                <div className="bg-rose-50 border border-rose-300 p-4 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between border-b border-rose-200 pb-2">
+                    <span className="text-xs font-bold text-rose-950 uppercase flex items-center gap-1.5">
+                      <Ban className="w-4 h-4 text-rose-700" />
+                      Análise Impossibilitada no Momento
+                    </span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                      activeRecordForModal.canAnalyzeInCurrentShift 
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300' 
+                        : 'bg-rose-200 text-rose-950 border-rose-300'
+                    }`}>
+                      {activeRecordForModal.canAnalyzeInCurrentShift ? 'Reanálise no turno: SIM' : 'Reanálise no turno: NÃO'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-rose-900 block">Motivo Informado:</span>
+                    <p className="text-xs font-semibold text-rose-950 bg-white p-2.5 rounded border border-rose-200 mt-1">
+                      {activeRecordForModal.unableToAnalyzeReason || 'Não detalhado'}
+                    </p>
+                  </div>
+
+                  {activeRecordForModal.canAnalyzeInCurrentShift && activeRecordForModal.estimatedAnalysisTimeInShift && (
+                    <div className="text-xs text-emerald-900 bg-emerald-50 p-2 rounded border border-emerald-200">
+                      <strong>Previsão de Retomada no Turno:</strong> {activeRecordForModal.estimatedAnalysisTimeInShift}
+                    </div>
+                  )}
+
+                  {activeRecordForModal.operationalDeviationsNotes && (
+                    <div className="text-xs text-slate-700 bg-white p-2 rounded border border-slate-200">
+                      <strong>Observações Operacionais:</strong> {activeRecordForModal.operationalDeviationsNotes}
+                    </div>
                   )}
                 </div>
               )}
@@ -723,7 +790,22 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
               )}
             </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <div>
+                {onEditRecord && (
+                  <button
+                    onClick={() => {
+                      const rec = activeRecordForModal;
+                      setActiveRecordForModal(null);
+                      onEditRecord(rec);
+                    }}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Editar este Lançamento</span>
+                  </button>
+                )}
+              </div>
               <button
                 onClick={() => setActiveRecordForModal(null)}
                 className="px-4 py-2 bg-slate-800 text-white text-xs font-semibold rounded-lg hover:bg-slate-900 cursor-pointer"
