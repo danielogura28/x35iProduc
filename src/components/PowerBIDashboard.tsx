@@ -647,7 +647,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
             </div>
             <div>
               <div className="text-[10px] font-black uppercase tracking-widest text-red-900 font-mono flex items-center gap-2">
-                <span>PETROPOL POLÍMEROS INDUSTRIAIS LTDA.</span>
+                <span>PETROPOL POLÍMEROS</span>
                 <span>•</span>
                 <span className="bg-red-100 text-red-950 px-1.5 py-0.5 rounded border border-red-300 font-bold">{DOCUMENT_IDENTIFIER}</span>
               </div>
