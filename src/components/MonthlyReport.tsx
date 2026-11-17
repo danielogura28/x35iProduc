@@ -28,6 +28,7 @@ import { exportMonthlyReportToExcel } from '../utils/excelExport';
 import { DailyReport } from './DailyReport';
 import { PowerBIDashboard } from './PowerBIDashboard';
 import { getMonthWeeks, isTimestampInRange } from '../utils/dateUtils';
+import { getRecordStoppageDetails, formatMinutesToHoursAndMins } from '../utils/deviationUtils';
 
 interface MonthlyReportProps {
   records: ProductionRecord[];
@@ -98,8 +99,12 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
       : 100;
 
     const totalStoppageMinutes = monthRecords.reduce((acc, r) => {
+      const details = getRecordStoppageDetails(r);
+      if (details.totalStopMinutes > 0) {
+        return acc + details.totalStopMinutes;
+      }
       if (r.lineStatus === 'manutencao' || r.lineStatus === 'setup' || r.lineStatus === 'preventiva' || r.lineStatus === 'inativa') {
-        return acc + (r.stoppageMinutes || 240); // 4h por turno parado se não especificado
+        return acc + (r.stoppageMinutes || 240);
       }
       return acc + (r.stoppageMinutes || 0);
     }, 0);
@@ -112,7 +117,7 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
 
     const conformingLabels = prodRecords.filter(r => r.labelCodesConforming && r.sealingQuality === 'conforme').length;
     const labelComplianceRate = prodRecords.length > 0 
-      ? Math.round((conformingLabels / prodRecords.length) * 100)
+      ? Math.round((conformingLabels / prodRecords.length) * 100) 
       : 100;
 
     const totalMaintenanceOrders = monthRecords.filter(r => r.lineStatus === 'manutencao' || r.hasMaintenanceOrder).length;
@@ -137,11 +142,11 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
 
   // Ranking de Operadores
   const operatorRanking = useMemo(() => {
-    const map: Record<string, { totalProd: number; activeCount: number; allCount: number; conformingCount: number; stoppageMins: number }> = {};
+    const map: Record<string, { totalProd: number; activeCount: number; allCount: number; conformingCount: number; stoppageMins: number; stopsCount: number }> = {};
 
     monthRecords.forEach(r => {
       if (!map[r.operatorName]) {
-        map[r.operatorName] = { totalProd: 0, activeCount: 0, allCount: 0, conformingCount: 0, stoppageMins: 0 };
+        map[r.operatorName] = { totalProd: 0, activeCount: 0, allCount: 0, conformingCount: 0, stoppageMins: 0, stopsCount: 0 };
       }
       map[r.operatorName].allCount += 1;
       const status = r.lineStatus || 'em_producao';
@@ -152,8 +157,10 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
       if (status === 'em_producao' && r.temperaturesConforming && r.parametersMatchPreviousSheet) {
         map[r.operatorName].conformingCount += 1;
       }
-      if (r.hasStoppage || status !== 'em_producao') {
-        map[r.operatorName].stoppageMins += r.stoppageMinutes || (status !== 'em_producao' ? 60 : 0);
+      const stopDetails = getRecordStoppageDetails(r);
+      if (stopDetails.totalStopsCount > 0 || stopDetails.totalStopMinutes > 0 || status !== 'em_producao') {
+        map[r.operatorName].stopsCount += stopDetails.totalStopsCount;
+        map[r.operatorName].stoppageMins += stopDetails.totalStopMinutes || (status !== 'em_producao' && status !== 'inativa' ? 60 : 0);
       }
     });
 
@@ -167,6 +174,7 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
         avgProd,
         complianceRate,
         stoppageMins: data.stoppageMins,
+        stopsCount: data.stopsCount,
         allCount: data.allCount,
         efficiencyScore
       };
@@ -180,11 +188,25 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
 
     monthRecords.forEach(r => {
       const status = r.lineStatus || 'em_producao';
-      if (status === 'manutencao') {
+      const details = getRecordStoppageDetails(r);
+
+      if (details.allEntries.length > 0) {
+        details.allEntries.forEach(entry => {
+          const reasonKey = entry.category === 'om'
+            ? `OM: ${entry.reason || 'Manutenção Corretiva'}`
+            : (entry.reason || 'Outro');
+          if (!stoppageMap[reasonKey]) stoppageMap[reasonKey] = { count: 0, minutes: 0 };
+          stoppageMap[reasonKey].count += 1;
+          stoppageMap[reasonKey].minutes += entry.durationMinutes;
+        });
+        if (status === 'manutencao') {
+          machineIssuesMap[r.machineId] = (machineIssuesMap[r.machineId] || 0) + 1;
+        }
+      } else if (status === 'manutencao') {
         const reason = 'Manutenção Corretiva (OM)';
         if (!stoppageMap[reason]) stoppageMap[reason] = { count: 0, minutes: 0 };
-        stoppageMap[reason].count += 1;
-        stoppageMap[reason].minutes += r.stoppageMinutes || 240;
+        stoppageMap[reason].count += details.omStopsCount || 1;
+        stoppageMap[reason].minutes += details.omStopMinutes || r.stoppageMinutes || 240;
         machineIssuesMap[r.machineId] = (machineIssuesMap[r.machineId] || 0) + 1;
       } else if (status === 'setup') {
         const reason = 'Troca de Matriz / Setup';
@@ -197,20 +219,22 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
         stoppageMap[reason].count += 1;
         stoppageMap[reason].minutes += r.stoppageMinutes || 180;
       } else if (r.hasStoppage) {
-        const reason = r.stoppageReason || 'Outro';
+        const reason = (r.stoppageReasonsList && r.stoppageReasonsList.length > 0)
+          ? r.stoppageReasonsList.join(', ')
+          : (r.stoppageReason || 'Outro');
         if (!stoppageMap[reason]) stoppageMap[reason] = { count: 0, minutes: 0 };
-        stoppageMap[reason].count += 1;
-        stoppageMap[reason].minutes += r.stoppageMinutes || 0;
+        stoppageMap[reason].count += details.machineStopsCount || r.stoppageQuantity || 1;
+        stoppageMap[reason].minutes += details.machineStopMinutes || r.stoppageMinutes || 0;
       }
 
-      if (status === 'em_producao' && (!r.temperaturesConforming || !r.parametersMatchPreviousSheet || r.hasStoppage)) {
+      if (status === 'em_producao' && (!r.temperaturesConforming || !r.parametersMatchPreviousSheet || r.hasStoppage || r.hasMaintenanceOrder)) {
         machineIssuesMap[r.machineId] = (machineIssuesMap[r.machineId] || 0) + 1;
       }
     });
 
     const sortedStoppages = Object.entries(stoppageMap)
       .map(([reason, d]) => ({ reason, ...d }))
-      .sort((a, b) => b.minutes - a.minutes);
+      .sort((a, b) => b.minutes - a.minutes || b.count - a.count);
 
     const sortedMachines = Object.entries(machineIssuesMap)
       .map(([machineId, count]) => ({ machineId, count }))
@@ -813,34 +837,58 @@ export const MonthlyReport: React.FC<MonthlyReportProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {criticalOccurrences.map((r) => (
-                    <tr key={r.id}>
-                      <td className="py-2 px-3 whitespace-nowrap">
-                        <span className="font-bold text-red-900">{r.machineId}</span> · {new Date(r.timestamp).toLocaleDateString('pt-BR')}
-                      </td>
-                      <td className="py-2 px-3">
-                        <span className="capitalize font-semibold text-slate-800">{r.lineStatus || 'em_producao'}</span>
-                      </td>
-                      <td className="py-2 px-3 font-mono font-semibold">
-                        {r.maintenanceOrderNumber ? `OM: ${r.maintenanceOrderNumber}` : (r.setupMaterial || r.productionOrder || '-')}
-                      </td>
-                      <td className="py-2 px-3">
-                        {r.operatorName} (Líder: {r.shiftLeader})
-                      </td>
-                      <td className="py-2 px-3 max-w-[280px]">
-                        {r.parameterDeviationReason || r.operationalDeviationsNotes || r.stoppageReason || '-'}
-                      </td>
-                      <td className="py-2 px-3">
-                        {r.deviationApprovedByLeader ? (
-                          <span className="text-emerald-700 font-semibold">
-                            Aprovado por {r.approvingLeaderName || r.shiftLeader}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">-</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                  {criticalOccurrences.map((r) => {
+                    const stopDetails = getRecordStoppageDetails(r);
+                    return (
+                      <tr key={r.id}>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span className="font-bold text-red-900">{r.machineId}</span> · {new Date(r.timestamp).toLocaleDateString('pt-BR')}
+                        </td>
+                        <td className="py-2 px-3">
+                          <span className="capitalize font-semibold text-slate-800">{r.lineStatus || 'em_producao'}</span>
+                          {stopDetails.totalStopMinutes > 0 && (
+                            <span className="block text-[10px] font-mono font-bold text-red-700 mt-0.5">
+                              ⏱ {formatMinutesToHoursAndMins(stopDetails.totalStopMinutes)} ({stopDetails.totalStopsCount}x)
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3 font-mono font-semibold">
+                          {r.maintenanceOrderNumber ? `OM: ${r.maintenanceOrderNumber}` : (r.setupMaterial || r.productionOrder || '-')}
+                        </td>
+                        <td className="py-2 px-3">
+                          {r.operatorName} (Líder: {r.shiftLeader})
+                        </td>
+                        <td className="py-2 px-3 max-w-[320px]">
+                          {stopDetails.allEntries.length > 0 ? (
+                            <div className="space-y-1">
+                              {stopDetails.allEntries.map((s, idx) => (
+                                <div key={s.id || idx} className="text-[11px] bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 font-mono">
+                                  <span className="font-bold text-red-800">
+                                    {s.category === 'om' ? '[OM]' : `#${idx + 1}`} {s.startTime}→{s.endTime} ({s.durationMinutes}m)
+                                  </span>{' '}
+                                  <span className="font-sans text-slate-700">{s.reason}</span>
+                                </div>
+                              ))}
+                              {(r.parameterDeviationReason || r.operationalDeviationsNotes) && (
+                                <div className="text-[11px] text-slate-600">{r.parameterDeviationReason || r.operationalDeviationsNotes}</div>
+                              )}
+                            </div>
+                          ) : (
+                            r.parameterDeviationReason || r.operationalDeviationsNotes || r.stoppageReason || '-'
+                          )}
+                        </td>
+                        <td className="py-2 px-3">
+                          {r.deviationApprovedByLeader ? (
+                            <span className="text-emerald-700 font-semibold">
+                              Aprovado por {r.approvingLeaderName || r.shiftLeader}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

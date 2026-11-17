@@ -18,7 +18,8 @@ import {
   Operator,
   ShiftLeader,
   ProductionRecord,
-  PhotoAttachment 
+  PhotoAttachment,
+  StoppageEntry
 } from '../types/production';
 import { 
   Camera, 
@@ -43,11 +44,18 @@ import {
   Timer,
   AlertOctagon,
   Ban,
-  Pencil
+  Pencil,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { TeamManagerModal } from './TeamManagerModal';
 import { getGlobalLineStatuses } from '../utils/storage';
-import { formatAnalysisDuration, DOCUMENT_FULL_TITLE } from '../utils/deviationUtils';
+import { 
+  formatAnalysisDuration, 
+  DOCUMENT_FULL_TITLE,
+  calculateStoppageMinutes,
+  formatMinutesToHoursAndMins
+} from '../utils/deviationUtils';
 
 interface EntryFormProps {
   initialMachine?: MachineId;
@@ -233,11 +241,21 @@ export const EntryForm: React.FC<EntryFormProps> = ({
   const [deviationReportLeaderName, setDeviationReportLeaderName] = useState<string>(() => shiftLeaders[0]?.name || 'Fernando Rocha');
   const [deviationReportLeaderNotes, setDeviationReportLeaderNotes] = useState<string>('');
 
-  // Ponto 7: Paradas de Máquina (Apenas Quantidade e Motivos, SEM horários)
+  // Ponto 7: Paradas de Máquina e OM (Quantidades, Horários Início/Fim Exatos e Motivos)
+  const createEmptyStop = (defaultReason: StoppageReason = 'Troca de Tela'): StoppageEntry => ({
+    id: 'stop-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    startTime: '',
+    endTime: '',
+    durationMinutes: 0,
+    reason: defaultReason,
+  });
+
   const [hasStoppage, setHasStoppage] = useState<boolean>(false);
   const [stoppageQuantity, setStoppageQuantity] = useState<string>('1');
-  const [stoppageReasonsList, setStoppageReasonsList] = useState<StoppageReason[]>(['Troca de Tela']);
+  const [stoppages, setStoppages] = useState<StoppageEntry[]>(() => [createEmptyStop('Troca de Tela')]);
   const [hasMaintenanceOrderInProd, setHasMaintenanceOrderInProd] = useState<boolean>(false);
+  const [omStopQuantity, setOmStopQuantity] = useState<string>('1');
+  const [maintenanceOrderStops, setMaintenanceOrderStops] = useState<StoppageEntry[]>(() => [createEmptyStop('Mecânica')]);
   const [operationalDeviationsNotes, setOperationalDeviationsNotes] = useState<string>('');
 
   // Fotos
@@ -334,10 +352,51 @@ export const EntryForm: React.FC<EntryFormProps> = ({
       if (recordToEdit.deviationReportLeaderName) setDeviationReportLeaderName(recordToEdit.deviationReportLeaderName);
       setDeviationReportLeaderNotes(recordToEdit.deviationReportLeaderNotes || '');
 
-      setHasStoppage(!!recordToEdit.hasStoppage);
-      setStoppageQuantity(String(recordToEdit.stoppageQuantity || 1));
-      if (recordToEdit.stoppageReasonsList) setStoppageReasonsList(recordToEdit.stoppageReasonsList);
-      setHasMaintenanceOrderInProd(!!recordToEdit.hasMaintenanceOrder && recordToEdit.lineStatus === 'em_producao');
+      setHasStoppage(!!recordToEdit.hasStoppage && recordToEdit.lineStatus !== 'manutencao');
+      if (recordToEdit.stoppages && recordToEdit.stoppages.length > 0) {
+        setStoppageQuantity(String(recordToEdit.stoppages.length));
+        setStoppages(recordToEdit.stoppages.map(s => ({
+          ...s,
+          durationMinutes: s.startTime && s.endTime ? calculateStoppageMinutes(s.startTime, s.endTime) : (s.durationMinutes || 0)
+        })));
+      } else if (recordToEdit.hasStoppage && recordToEdit.lineStatus !== 'manutencao') {
+        const qty = Math.max(1, recordToEdit.stoppageQuantity || 1);
+        setStoppageQuantity(String(qty));
+        const synth: StoppageEntry[] = Array.from({ length: qty }, (_, idx) => ({
+          id: `stop-edit-${idx}-${Date.now()}`,
+          startTime: '',
+          endTime: '',
+          durationMinutes: 0,
+          reason: recordToEdit.stoppageReasonsList?.[idx] || recordToEdit.stoppageReason || 'Troca de Tela',
+        }));
+        setStoppages(synth);
+      } else {
+        setStoppageQuantity('1');
+        setStoppages([createEmptyStop('Troca de Tela')]);
+      }
+
+      const hasOm = !!recordToEdit.hasMaintenanceOrder && recordToEdit.lineStatus === 'em_producao';
+      setHasMaintenanceOrderInProd(hasOm);
+      if (recordToEdit.maintenanceOrderStops && recordToEdit.maintenanceOrderStops.length > 0) {
+        setOmStopQuantity(String(recordToEdit.maintenanceOrderStops.length));
+        setMaintenanceOrderStops(recordToEdit.maintenanceOrderStops.map(s => ({
+          ...s,
+          durationMinutes: s.startTime && s.endTime ? calculateStoppageMinutes(s.startTime, s.endTime) : (s.durationMinutes || 0)
+        })));
+      } else if (hasOm || recordToEdit.lineStatus === 'manutencao') {
+        const omQty = Math.max(1, recordToEdit.maintenanceOrderStopQuantity || 1);
+        setOmStopQuantity(String(omQty));
+        setMaintenanceOrderStops(Array.from({ length: omQty }, (_, idx) => ({
+          id: `omstop-edit-${idx}-${Date.now()}`,
+          startTime: '',
+          endTime: '',
+          durationMinutes: 0,
+          reason: 'Mecânica',
+        })));
+      } else {
+        setOmStopQuantity('1');
+        setMaintenanceOrderStops([createEmptyStop('Mecânica')]);
+      }
       setOperationalDeviationsNotes(recordToEdit.operationalDeviationsNotes || '');
 
       if (recordToEdit.photos) setPhotos(recordToEdit.photos);
@@ -376,13 +435,69 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     magnetStatus === 'nao_conforme' ||
     sievePowderCondition === 'peneira_obstruida';
 
-  const toggleStoppageReason = (reason: StoppageReason) => {
-    setStoppageReasonsList(prev => 
-      prev.includes(reason) 
-        ? prev.filter(r => r !== reason)
-        : [...prev, reason]
-    );
+  const syncStoppagesArray = (current: StoppageEntry[], targetQty: number, defaultReason: StoppageReason): StoppageEntry[] => {
+    const safeQty = Math.max(1, Math.min(50, targetQty));
+    const next = current.slice(0, safeQty);
+    while (next.length < safeQty) {
+      next.push(createEmptyStop(defaultReason));
+    }
+    return next;
   };
+
+  const handleStoppageQuantityChange = (val: string) => {
+    setStoppageQuantity(val);
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed >= 1) {
+      setStoppages(prev => syncStoppagesArray(prev, parsed, 'Troca de Tela'));
+    }
+  };
+
+  const updateMachineStoppage = (idx: number, patch: Partial<StoppageEntry>) => {
+    setStoppages(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const updated = { ...item, ...patch };
+      updated.durationMinutes = calculateStoppageMinutes(updated.startTime, updated.endTime);
+      return updated;
+    }));
+  };
+
+  const removeMachineStoppage = (idx: number) => {
+    setStoppages(prev => {
+      if (prev.length <= 1) return prev;
+      const filtered = prev.filter((_, i) => i !== idx);
+      setStoppageQuantity(String(filtered.length));
+      return filtered;
+    });
+  };
+
+  const handleOmStopQuantityChange = (val: string) => {
+    setOmStopQuantity(val);
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed >= 1) {
+      setMaintenanceOrderStops(prev => syncStoppagesArray(prev, parsed, 'Mecânica'));
+    }
+  };
+
+  const updateOmStoppage = (idx: number, patch: Partial<StoppageEntry>) => {
+    setMaintenanceOrderStops(prev => prev.map((item, i) => {
+      if (i !== idx) return item;
+      const updated = { ...item, ...patch };
+      updated.durationMinutes = calculateStoppageMinutes(updated.startTime, updated.endTime);
+      return updated;
+    }));
+  };
+
+  const removeOmStoppage = (idx: number) => {
+    setMaintenanceOrderStops(prev => {
+      if (prev.length <= 1) return prev;
+      const filtered = prev.filter((_, i) => i !== idx);
+      setOmStopQuantity(String(filtered.length));
+      return filtered;
+    });
+  };
+
+  const totalMachineStopMinutes = stoppages.reduce((sum, s) => sum + calculateStoppageMinutes(s.startTime, s.endTime), 0);
+  const totalOmStopMinutes = maintenanceOrderStops.reduce((sum, s) => sum + calculateStoppageMinutes(s.startTime, s.endTime), 0);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -430,6 +545,21 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     } else if (lineStatus === 'manutencao') {
       if (!maintenanceOrderNumber.trim()) {
         newErrors.push('Para linha em Manutenção, informe o número da Ordem de Manutenção (OM).');
+      }
+      const omQty = parseInt(omStopQuantity, 10);
+      if (isNaN(omQty) || omQty <= 0) {
+        newErrors.push('Informe a quantidade de paradas da Ordem de Manutenção (OM).');
+      } else {
+        maintenanceOrderStops.slice(0, omQty).forEach((s, idx) => {
+          if (!s.startTime || !s.endTime) {
+            newErrors.push(`Parada de OM #${idx + 1}: informe o horário de início e o horário final.`);
+          } else if (calculateStoppageMinutes(s.startTime, s.endTime) <= 0) {
+            newErrors.push(`Parada de OM #${idx + 1}: o horário final deve ser diferente do horário de início.`);
+          }
+          if (!s.reason) {
+            newErrors.push(`Parada de OM #${idx + 1}: selecione o motivo da parada.`);
+          }
+        });
       }
     } else if (lineStatus === 'setup') {
       if (!setupMaterial.trim()) {
@@ -557,19 +687,44 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         newErrors.push('Descreva a observação / não conformidade no setor de embalagem e selagem.');
       }
 
-      // 12. Paradas de Máquina
+      // 12. Paradas de Máquina (Quantidade, Horário Inicial/Final e Motivo por parada)
       if (hasStoppage) {
         const stopQty = parseInt(stoppageQuantity, 10);
         if (isNaN(stopQty) || stopQty <= 0) {
           newErrors.push('Informe a quantidade de paradas ocorridas na máquina.');
-        }
-        if (stoppageReasonsList.length === 0) {
-          newErrors.push('Selecione pelo menos um motivo para a parada da máquina.');
+        } else {
+          stoppages.slice(0, stopQty).forEach((s, idx) => {
+            if (!s.startTime || !s.endTime) {
+              newErrors.push(`Parada #${idx + 1}: informe o horário inicial e o horário final.`);
+            } else if (calculateStoppageMinutes(s.startTime, s.endTime) <= 0) {
+              newErrors.push(`Parada #${idx + 1}: o horário final deve ser diferente do horário de início.`);
+            }
+            if (!s.reason) {
+              newErrors.push(`Parada #${idx + 1}: selecione o motivo da parada.`);
+            }
+          });
         }
       }
 
-      if (hasMaintenanceOrderInProd && !maintenanceOrderNumber.trim()) {
-        newErrors.push('Informe o número da Ordem de Manutenção (OM) aberta durante a produção.');
+      if (hasMaintenanceOrderInProd) {
+        if (!maintenanceOrderNumber.trim()) {
+          newErrors.push('Informe o número da Ordem de Manutenção (OM) aberta durante a produção.');
+        }
+        const omQty = parseInt(omStopQuantity, 10);
+        if (isNaN(omQty) || omQty <= 0) {
+          newErrors.push('Informe a quantidade de paradas referentes à Ordem de Manutenção (OM).');
+        } else {
+          maintenanceOrderStops.slice(0, omQty).forEach((s, idx) => {
+            if (!s.startTime || !s.endTime) {
+              newErrors.push(`Parada de OM #${idx + 1}: informe o horário inicial e o horário final.`);
+            } else if (calculateStoppageMinutes(s.startTime, s.endTime) <= 0) {
+              newErrors.push(`Parada de OM #${idx + 1}: o horário final deve ser diferente do horário de início.`);
+            }
+            if (!s.reason) {
+              newErrors.push(`Parada de OM #${idx + 1}: selecione o motivo da parada de OM.`);
+            }
+          });
+        }
       }
 
       // 13. Comunicação Obrigatória ao Líder de Turno em Caso de Desvio
@@ -604,6 +759,15 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     let record: ProductionRecord;
 
     if (lineStatus === 'manutencao') {
+      const omQty = Math.max(1, parseInt(omStopQuantity, 10) || 1);
+      const normalizedOmStops = maintenanceOrderStops.slice(0, omQty).map((s) => ({
+        ...s,
+        omNumber: maintenanceOrderNumber.trim().toUpperCase(),
+        durationMinutes: calculateStoppageMinutes(s.startTime, s.endTime),
+      }));
+      const omTotalMins = normalizedOmStops.reduce((sum, s) => sum + s.durationMinutes, 0);
+      const omReasons = Array.from(new Set(normalizedOmStops.map((s) => s.reason)));
+
       record = {
         id: targetRecordId,
         timestamp: new Date(dateTime).toISOString(),
@@ -614,9 +778,14 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         lineStatus: 'manutencao',
         hasMaintenanceOrder: true,
         maintenanceOrderNumber: maintenanceOrderNumber.trim().toUpperCase(),
+        maintenanceOrderStopQuantity: normalizedOmStops.length,
+        maintenanceOrderStops: normalizedOmStops,
+        maintenanceOrderTotalMinutes: omTotalMins,
         hasStoppage: true,
-        stoppageQuantity: 1,
-        stoppageReasonsList: ['Mecânica'],
+        stoppageQuantity: normalizedOmStops.length,
+        stoppageReasonsList: omReasons.length > 0 ? omReasons : ['Mecânica'],
+        stoppageReason: omReasons[0] || 'Mecânica',
+        stoppageMinutes: omTotalMins,
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || 'Linha sob intervenção de manutenção.',
         analysisDurationSeconds: finalDuration,
         photos,
@@ -761,11 +930,53 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         deviationReportLeaderNotes: deviationReportedToLeader ? deviationReportLeaderNotes.trim() : undefined,
         
         hasStoppage,
-        stoppageQuantity: hasStoppage ? parseInt(stoppageQuantity, 10) : 0,
-        stoppageReasonsList: hasStoppage ? stoppageReasonsList : [],
-        stoppageReason: hasStoppage && stoppageReasonsList.length > 0 ? stoppageReasonsList[0] : undefined,
+        stoppageQuantity: hasStoppage ? Math.max(1, parseInt(stoppageQuantity, 10) || stoppages.length) : 0,
+        stoppages: hasStoppage
+          ? stoppages.slice(0, Math.max(1, parseInt(stoppageQuantity, 10) || stoppages.length)).map((s) => ({
+              ...s,
+              durationMinutes: calculateStoppageMinutes(s.startTime, s.endTime),
+            }))
+          : [],
+        stoppageReasonsList: hasStoppage
+          ? Array.from(
+              new Set(
+                stoppages
+                  .slice(0, Math.max(1, parseInt(stoppageQuantity, 10) || stoppages.length))
+                  .map((s) => s.reason)
+              )
+            )
+          : [],
+        stoppageReason: hasStoppage && stoppages.length > 0 ? stoppages[0].reason : undefined,
         hasMaintenanceOrder: hasMaintenanceOrderInProd,
         maintenanceOrderNumber: hasMaintenanceOrderInProd ? maintenanceOrderNumber.trim().toUpperCase() : undefined,
+        maintenanceOrderStopQuantity: hasMaintenanceOrderInProd
+          ? Math.max(1, parseInt(omStopQuantity, 10) || maintenanceOrderStops.length)
+          : 0,
+        maintenanceOrderStops: hasMaintenanceOrderInProd
+          ? maintenanceOrderStops
+              .slice(0, Math.max(1, parseInt(omStopQuantity, 10) || maintenanceOrderStops.length))
+              .map((s) => ({
+                ...s,
+                omNumber: maintenanceOrderNumber.trim().toUpperCase(),
+                durationMinutes: calculateStoppageMinutes(s.startTime, s.endTime),
+              }))
+          : [],
+        maintenanceOrderTotalMinutes: hasMaintenanceOrderInProd
+          ? maintenanceOrderStops
+              .slice(0, Math.max(1, parseInt(omStopQuantity, 10) || maintenanceOrderStops.length))
+              .reduce((sum, s) => sum + calculateStoppageMinutes(s.startTime, s.endTime), 0)
+          : 0,
+        stoppageMinutes:
+          (hasStoppage
+            ? stoppages
+                .slice(0, Math.max(1, parseInt(stoppageQuantity, 10) || stoppages.length))
+                .reduce((sum, s) => sum + calculateStoppageMinutes(s.startTime, s.endTime), 0)
+            : 0) +
+          (hasMaintenanceOrderInProd
+            ? maintenanceOrderStops
+                .slice(0, Math.max(1, parseInt(omStopQuantity, 10) || maintenanceOrderStops.length))
+                .reduce((sum, s) => sum + calculateStoppageMinutes(s.startTime, s.endTime), 0)
+            : 0),
         operationalDeviationsNotes: operationalDeviationsNotes.trim() || undefined,
         analysisDurationSeconds: finalDuration,
         photos,
@@ -1148,27 +1359,142 @@ export const EntryForm: React.FC<EntryFormProps> = ({
               <Wrench className="w-5 h-5 text-red-700" />
               <div>
                 <h3 className="text-sm font-bold text-red-900 uppercase tracking-wide">
-                  Linha em Manutenção
+                  Linha em Manutenção (OM & Horários de Parada)
                 </h3>
                 <p className="text-xs text-red-700">
-                  Informe apenas o número da Ordem de Manutenção (OM). Os demais parâmetros não são exigidos.
+                  Informe o número da OM, quantidade de paradas, horários de início/fim e o motivo de cada parada.
                 </p>
               </div>
             </div>
 
-            <div className="max-w-md">
-              <label className="block text-xs font-bold text-red-950 mb-1">
-                Número da Ordem de Manutenção (OM): <span className="text-red-600">*</span>
-              </label>
-              <input
-                type="text"
-                placeholder="Ex: OM-2026-8845"
-                value={maintenanceOrderNumber}
-                onChange={(e) => setMaintenanceOrderNumber(e.target.value)}
-                className="w-full text-base font-mono font-bold uppercase bg-white border border-red-300 rounded-lg p-3 focus:ring-2 focus:ring-red-600 focus:outline-none shadow-xs"
-                required
-                autoFocus
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-red-950 mb-1">
+                  Número da Ordem de Manutenção (OM): <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: OM-2026-8845"
+                  value={maintenanceOrderNumber}
+                  onChange={(e) => setMaintenanceOrderNumber(e.target.value)}
+                  className="w-full text-sm font-mono font-bold uppercase bg-white border border-red-300 rounded-lg p-2.5 focus:ring-2 focus:ring-red-600 focus:outline-none shadow-xs"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-red-950 mb-1">
+                  Quantidade de Paradas de OM: <span className="text-red-600">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={omStopQuantity}
+                  onChange={(e) => handleOmStopQuantityChange(e.target.value)}
+                  placeholder="Ex: 1"
+                  className="w-full text-sm font-mono font-bold bg-white border border-red-300 rounded-lg p-2.5 focus:ring-2 focus:ring-red-600 focus:outline-none shadow-xs"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+              {maintenanceOrderStops.map((stop, idx) => {
+                const mins = calculateStoppageMinutes(stop.startTime, stop.endTime);
+                return (
+                  <div key={stop.id} className="bg-white border border-red-200 rounded-lg p-3 space-y-2 shadow-2xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-red-950 font-mono">
+                        Parada OM #{idx + 1}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {stop.startTime && stop.endTime ? (
+                          mins > 0 ? (
+                            <span className="px-2 py-0.5 rounded bg-red-100 text-red-900 border border-red-300 text-[11px] font-mono font-bold">
+                              ⏱ {formatMinutesToHoursAndMins(mins)} ({mins} min)
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-semibold">
+                              Horários iguais (0 min)
+                            </span>
+                          )
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 text-[10px]">
+                            Informe início e fim
+                          </span>
+                        )}
+                        {maintenanceOrderStops.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeOmStoppage(idx)}
+                            className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                            title="Remover esta parada"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                          Horário Início: <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          value={stop.startTime}
+                          onChange={(e) => updateOmStoppage(idx, { startTime: e.target.value })}
+                          className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-600"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                          Horário Final: <span className="text-red-600">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          value={stop.endTime}
+                          onChange={(e) => updateOmStoppage(idx, { endTime: e.target.value })}
+                          className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-600"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                          Motivo da Parada (OM): <span className="text-red-600">*</span>
+                        </label>
+                        <select
+                          value={stop.reason}
+                          onChange={(e) => updateOmStoppage(idx, { reason: e.target.value as StoppageReason })}
+                          className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-600"
+                          required
+                        >
+                          {STOPPAGE_REASONS_LIST.map((reason) => (
+                            <option key={reason} value={reason}>
+                              {reason}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 bg-red-950 text-white px-3.5 py-2.5 rounded-lg text-xs">
+              <span className="font-semibold">
+                Total OM: <strong>{maintenanceOrderStops.length}</strong> parada(s)
+              </span>
+              <span className="font-mono font-bold text-amber-300">
+                Tempo Total Contabilizado: {formatMinutesToHoursAndMins(totalOmStopMinutes)} ({totalOmStopMinutes} min)
+              </span>
             </div>
 
             <div>
@@ -2540,31 +2866,48 @@ export const EntryForm: React.FC<EntryFormProps> = ({
               </div>
             </div>
 
-            {/* PONTO 7: PARADAS DE MÁQUINA & OM (APENAS QUANTIDADES E MOTIVOS, SEM HORÁRIOS) */}
+            {/* PONTO 7: PARADAS DE MÁQUINA (QUANTIDADES, HORÁRIOS E MOTIVOS) & OM */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                <div className="w-7 h-7 rounded-md bg-red-800 text-white flex items-center justify-center text-xs font-bold font-mono">
-                  7
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-md bg-red-800 text-white flex items-center justify-center text-xs font-bold font-mono shrink-0">
+                    7
+                  </div>
+                  <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+                    Paradas de Máquina (Quantidades, Horários e Motivos) & OM
+                  </h2>
                 </div>
-                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
-                  Paradas de Máquina (Quantidades e Motivos) & OM
-                </h2>
+                {(hasStoppage || hasMaintenanceOrderInProd) && (
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-red-950 text-amber-300 text-xs font-mono font-bold self-start sm:self-auto">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>
+                      Total Parado: {formatMinutesToHoursAndMins((hasStoppage ? totalMachineStopMinutes : 0) + (hasMaintenanceOrderInProd ? totalOmStopMinutes : 0))} ({(hasStoppage ? totalMachineStopMinutes : 0) + (hasMaintenanceOrderInProd ? totalOmStopMinutes : 0)} min)
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Parada: Quantidade e Motivos */}
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Parada de Máquina: Quantidade, Horário Inicial/Final e Motivo de cada parada */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
                       <label className="text-xs font-bold text-slate-800 block">
                         Houve Parada da Extrusora no Período?
                       </label>
-                      <span className="text-[10px] text-slate-500">Informe apenas a quantidade e os motivos</span>
+                      <span className="text-[10px] text-slate-500">
+                        Informe a quantidade, horário inicial, final e o motivo de cada parada
+                      </span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setHasStoppage(true)}
+                        onClick={() => {
+                          setHasStoppage(true);
+                          if (!stoppageQuantity || parseInt(stoppageQuantity, 10) < 1) {
+                            handleStoppageQuantityChange('1');
+                          }
+                        }}
                         className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${
                           hasStoppage ? 'bg-red-700 text-white' : 'bg-white border text-slate-700'
                         }`}
@@ -2588,62 +2931,152 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 
                   {hasStoppage && (
                     <div className="space-y-3 pt-2 border-t border-slate-200">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                          Quantidade de Paradas: <span className="text-red-600">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={stoppageQuantity}
-                          onChange={(e) => setStoppageQuantity(e.target.value)}
-                          placeholder="Ex: 2"
-                          className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded p-2 focus:outline-none"
-                          required
-                        />
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Quantidade de Paradas: <span className="text-red-600">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="50"
+                            value={stoppageQuantity}
+                            onChange={(e) => handleStoppageQuantityChange(e.target.value)}
+                            placeholder="Ex: 5"
+                            className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-600"
+                            required
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleStoppageQuantityChange(String((parseInt(stoppageQuantity, 10) || stoppages.length) + 1))}
+                          className="px-2.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 rounded text-xs font-semibold text-slate-700 flex items-center gap-1 cursor-pointer"
+                          title="Adicionar mais uma parada"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-red-700" />
+                          <span>+1 Parada</span>
+                        </button>
                       </div>
 
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                          Selecione o(s) Motivo(s) da(s) Parada(s):
-                        </label>
-                        <div className="grid grid-cols-2 gap-1.5 pt-1">
-                          {STOPPAGE_REASONS_LIST.map((reason) => {
-                            const isSelected = stoppageReasonsList.includes(reason);
-                            return (
-                              <button
-                                type="button"
-                                key={reason}
-                                onClick={() => toggleStoppageReason(reason)}
-                                className={`p-2 rounded text-left text-xs font-medium border transition-colors cursor-pointer ${
-                                  isSelected
-                                    ? 'bg-red-100 border-red-400 text-red-950 font-bold'
-                                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                {isSelected ? '✓ ' : '+ '} {reason}
-                              </button>
-                            );
-                          })}
-                        </div>
+                      {/* Lista individual das paradas */}
+                      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {stoppages.map((stop, idx) => {
+                          const mins = calculateStoppageMinutes(stop.startTime, stop.endTime);
+                          return (
+                            <div key={stop.id} className="bg-white border border-slate-200 rounded-lg p-2.5 space-y-2 shadow-2xs">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-slate-900 font-mono bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                  Parada #{idx + 1}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {stop.startTime && stop.endTime ? (
+                                    mins > 0 ? (
+                                      <span className="px-2 py-0.5 rounded bg-red-50 text-red-900 border border-red-200 text-[10px] font-mono font-bold">
+                                        ⏱ {formatMinutesToHoursAndMins(mins)} ({mins} min)
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                                        Início = Final (0 min)
+                                      </span>
+                                    )
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px]">
+                                      Informe início e final
+                                    </span>
+                                  )}
+                                  {stoppages.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeMachineStoppage(idx)}
+                                      className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                                      title="Remover esta parada"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                                    Horário Início: <span className="text-red-600">*</span>
+                                  </label>
+                                  <input
+                                    type="time"
+                                    value={stop.startTime}
+                                    onChange={(e) => updateMachineStoppage(idx, { startTime: e.target.value })}
+                                    className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-red-600"
+                                    required
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                                    Horário Final: <span className="text-red-600">*</span>
+                                  </label>
+                                  <input
+                                    type="time"
+                                    value={stop.endTime}
+                                    onChange={(e) => updateMachineStoppage(idx, { endTime: e.target.value })}
+                                    className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-red-600"
+                                    required
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                                    Motivo: <span className="text-red-600">*</span>
+                                  </label>
+                                  <select
+                                    value={stop.reason}
+                                    onChange={(e) => updateMachineStoppage(idx, { reason: e.target.value as StoppageReason })}
+                                    className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-red-600"
+                                    required
+                                  >
+                                    {STOPPAGE_REASONS_LIST.map((reason) => (
+                                      <option key={reason} value={reason}>
+                                        {reason}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center justify-between bg-red-900/10 border border-red-200 px-3 py-2 rounded-lg text-[11px] text-red-950 font-semibold">
+                        <span>Total Máquina: <strong>{stoppages.length}</strong> parada(s)</span>
+                        <span className="font-mono font-bold text-red-900">
+                          Tempo: {formatMinutesToHoursAndMins(totalMachineStopMinutes)} ({totalMachineStopMinutes} min)
+                        </span>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Ordem de Manutenção (OM) */}
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
+                {/* Ordem de Manutenção (OM) & Paradas de OM */}
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
                       <label className="text-xs font-bold text-slate-800 block">
                         Ordem de Manutenção (OM) Aberta?
                       </label>
-                      <span className="text-[10px] text-slate-500">Chamado técnico para a equipe</span>
+                      <span className="text-[10px] text-slate-500">
+                        Chamado técnico, quantidade, horários inicial/final e motivo da OM
+                      </span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setHasMaintenanceOrderInProd(true)}
+                        onClick={() => {
+                          setHasMaintenanceOrderInProd(true);
+                          if (!omStopQuantity || parseInt(omStopQuantity, 10) < 1) {
+                            handleOmStopQuantityChange('1');
+                          }
+                        }}
                         className={`px-3 py-1 text-xs font-semibold rounded cursor-pointer ${
                           hasMaintenanceOrderInProd ? 'bg-red-700 text-white' : 'bg-white border text-slate-700'
                         }`}
@@ -2666,18 +3099,145 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                   </div>
 
                   {hasMaintenanceOrderInProd && (
-                    <div className="pt-2 border-t border-slate-200">
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                        Número da OM:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Ex: OM-2026-8845"
-                        value={maintenanceOrderNumber}
-                        onChange={(e) => setMaintenanceOrderNumber(e.target.value)}
-                        className="w-full text-xs font-mono font-bold uppercase bg-white border border-slate-300 rounded p-2 focus:outline-none"
-                        required
-                      />
+                    <div className="space-y-3 pt-2 border-t border-slate-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Número da OM: <span className="text-red-600">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: OM-2026-8845"
+                            value={maintenanceOrderNumber}
+                            onChange={(e) => setMaintenanceOrderNumber(e.target.value)}
+                            className="w-full text-xs font-mono font-bold uppercase bg-white border border-slate-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-600"
+                            required
+                          />
+                        </div>
+
+                        <div className="flex items-end gap-1.5">
+                          <div className="flex-1">
+                            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                              Qtd. Paradas OM: <span className="text-red-600">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="50"
+                              value={omStopQuantity}
+                              onChange={(e) => handleOmStopQuantityChange(e.target.value)}
+                              placeholder="Ex: 1"
+                              className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-red-600"
+                              required
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleOmStopQuantityChange(String((parseInt(omStopQuantity, 10) || maintenanceOrderStops.length) + 1))}
+                            className="px-2.5 py-2 bg-white border border-slate-300 hover:bg-slate-100 rounded text-xs font-semibold text-slate-700 flex items-center gap-1 cursor-pointer shrink-0"
+                            title="Adicionar parada de OM"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-red-700" />
+                            <span>+1</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Lista individual das paradas de OM */}
+                      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                        {maintenanceOrderStops.map((stop, idx) => {
+                          const mins = calculateStoppageMinutes(stop.startTime, stop.endTime);
+                          return (
+                            <div key={stop.id} className="bg-white border border-red-200 rounded-lg p-2.5 space-y-2 shadow-2xs">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-red-950 font-mono bg-red-50 px-2 py-0.5 rounded border border-red-200">
+                                  Parada OM #{idx + 1}
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {stop.startTime && stop.endTime ? (
+                                    mins > 0 ? (
+                                      <span className="px-2 py-0.5 rounded bg-red-100 text-red-900 border border-red-300 text-[10px] font-mono font-bold">
+                                        ⏱ {formatMinutesToHoursAndMins(mins)} ({mins} min)
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                                        Início = Final (0 min)
+                                      </span>
+                                    )
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px]">
+                                      Informe início e final
+                                    </span>
+                                  )}
+                                  {maintenanceOrderStops.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeOmStoppage(idx)}
+                                      className="p-1 text-slate-400 hover:text-red-600 rounded cursor-pointer"
+                                      title="Remover parada de OM"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                                    Horário Início: <span className="text-red-600">*</span>
+                                  </label>
+                                  <input
+                                    type="time"
+                                    value={stop.startTime}
+                                    onChange={(e) => updateOmStoppage(idx, { startTime: e.target.value })}
+                                    className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-red-600"
+                                    required
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                                    Horário Final: <span className="text-red-600">*</span>
+                                  </label>
+                                  <input
+                                    type="time"
+                                    value={stop.endTime}
+                                    onChange={(e) => updateOmStoppage(idx, { endTime: e.target.value })}
+                                    className="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-red-600"
+                                    required
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                                    Motivo (OM): <span className="text-red-600">*</span>
+                                  </label>
+                                  <select
+                                    value={stop.reason}
+                                    onChange={(e) => updateOmStoppage(idx, { reason: e.target.value as StoppageReason })}
+                                    className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded p-1.5 focus:outline-none focus:ring-2 focus:ring-red-600"
+                                    required
+                                  >
+                                    {STOPPAGE_REASONS_LIST.map((reason) => (
+                                      <option key={reason} value={reason}>
+                                        {reason}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center justify-between bg-red-900/10 border border-red-200 px-3 py-2 rounded-lg text-[11px] text-red-950 font-semibold">
+                        <span>Total OM: <strong>{maintenanceOrderStops.length}</strong> parada(s)</span>
+                        <span className="font-mono font-bold text-red-900">
+                          Tempo OM: {formatMinutesToHoursAndMins(totalOmStopMinutes)} ({totalOmStopMinutes} min)
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>

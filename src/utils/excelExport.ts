@@ -20,6 +20,8 @@ import {
 import {
   formatAnalysisDuration,
   analyzeRecordDeviations,
+  getRecordStoppageDetails,
+  formatMinutesToHoursAndMins,
   DOCUMENT_IDENTIFIER,
   DOCUMENT_FULL_TITLE
 } from './deviationUtils';
@@ -77,7 +79,8 @@ export function exportMonthlyReportToExcel(
     ? Math.round((conformingSheets / prodRecords.length) * 100) 
     : 100;
 
-  const totalStoppagesQty = monthRecords.reduce((acc, r) => acc + (r.stoppageQuantity || (r.hasStoppage ? 1 : 0)), 0);
+  const totalStoppagesQty = monthRecords.reduce((acc, r) => acc + getRecordStoppageDetails(r).totalStopsCount, 0);
+  const totalStoppageMinutes = monthRecords.reduce((acc, r) => acc + getRecordStoppageDetails(r).totalStopMinutes, 0);
 
   const conformingLabels = prodRecords.filter(r => r.labelCodesConforming && r.sealingQuality === 'conforme').length;
   const labelComplianceRate = prodRecords.length > 0 
@@ -171,10 +174,10 @@ export function exportMonthlyReportToExcel(
     ],
     [
       'Paradas e Chamados Técnicos',
-      `${totalStoppagesQty} paradas`,
+      `${totalStoppagesQty} paradas (${formatMinutesToHoursAndMins(totalStoppageMinutes)})`,
       'Máx 12h/máq',
-      totalStoppagesQty === 0 ? '🟢 NENHUMA PARADA' : (totalStoppagesQty <= 5 ? '🟡 BAIXO IMPACTO' : '🔴 IMPACTO OPERACIONAL'),
-      `${totalMaintenanceOrders} OMs abertas`,
+      totalStoppagesQty === 0 ? '🟢 NENHUMA PARADA' : (totalStoppageMinutes <= 180 ? '🟡 BAIXO IMPACTO' : '🔴 IMPACTO OPERACIONAL'),
+      `${totalMaintenanceOrders} OMs abertas (${totalStoppageMinutes} min)`,
       `${totalSetupChecks} setups realizados`
     ],
     [''],
@@ -202,7 +205,8 @@ export function exportMonthlyReportToExcel(
     const pAvg = running.length > 0 ? Math.round(running.reduce((a, b) => a + (b.productivityKgh || 0), 0) / running.length) : 0;
     const cSheets = prod.filter(r => r.temperaturesConforming && r.parametersMatchPreviousSheet).length;
     const cRate = prod.length > 0 ? Math.round((cSheets / prod.length) * 100) : 100;
-    const pStops = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+    const pStops = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+    const pStopMins = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
 
     const pctOfGoal = Math.round((pAvg / (factoryGoals.targetAverageProductivityKgh || 1)) * 100);
     const prodBar = generateVisualBar(pAvg, factoryGoals.targetAverageProductivityKgh * 1.15, 14);
@@ -227,7 +231,7 @@ export function exportMonthlyReportToExcel(
       `${pctOfGoal}%`,
       `${cRate}%`,
       `${qualBar}`,
-      pStops === 0 ? '0 (Excelente)' : `${pStops} ocorrência(s)`,
+      pStops === 0 ? '0 (Excelente)' : `${pStops} par. (${formatMinutesToHoursAndMins(pStopMins)})`,
       evalStatus
     ]);
   });
@@ -238,54 +242,66 @@ export function exportMonthlyReportToExcel(
   dashboardRows.push(['└───────────────────────────────────────────────────────────────────────────────────────────────────┘']);
   dashboardRows.push([
     'Motivo da Parada',
-    'Qtd Ocorrências',
+    'Qtd / Tempo Exato',
     'Gráfico de Impacto Visual',
-    '% do Total',
+    '% do Tempo',
     '% Acumulada',
     'Severidade'
   ]);
 
-  // Contagem de motivos
-  const reasonCounts: Record<string, number> = {};
+  // Contagem e minutos exatos por motivo
+  const reasonStats: Record<string, { count: number; minutes: number }> = {};
   STOPPAGE_REASONS_LIST.forEach(reason => {
-    reasonCounts[reason] = 0;
+    reasonStats[reason] = { count: 0, minutes: 0 };
   });
 
   monthRecords.forEach(r => {
-    if (r.hasStoppage) {
-      if (r.stoppageReasonsList && r.stoppageReasonsList.length > 0) {
-        r.stoppageReasonsList.forEach(m => {
-          reasonCounts[m] = (reasonCounts[m] || 0) + 1;
-        });
-      } else if (r.stoppageReason) {
-        reasonCounts[r.stoppageReason] = (reasonCounts[r.stoppageReason] || 0) + 1;
-      }
+    const details = getRecordStoppageDetails(r);
+    if (details.allEntries.length > 0) {
+      details.allEntries.forEach(entry => {
+        const key = entry.category === 'om' ? `OM: ${entry.reason || 'Manutenção Corretiva'}` : (entry.reason || 'Outro');
+        if (!reasonStats[key]) reasonStats[key] = { count: 0, minutes: 0 };
+        reasonStats[key].count += 1;
+        reasonStats[key].minutes += entry.durationMinutes;
+      });
+    } else if (r.hasStoppage || r.lineStatus === 'manutencao' || r.lineStatus === 'setup' || r.lineStatus === 'preventiva') {
+      const reason = r.lineStatus === 'manutencao'
+        ? 'Manutenção Corretiva (OM)'
+        : r.lineStatus === 'setup'
+        ? 'Setup / Limpeza'
+        : r.lineStatus === 'preventiva'
+        ? 'Preventiva Programada'
+        : (r.stoppageReasonsList && r.stoppageReasonsList.length > 0 ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || 'Outro'));
+      if (!reasonStats[reason]) reasonStats[reason] = { count: 0, minutes: 0 };
+      reasonStats[reason].count += details.totalStopsCount || 1;
+      reasonStats[reason].minutes += details.totalStopMinutes;
     }
   });
 
-  const sortedReasons = Object.entries(reasonCounts)
-    .filter(([_, count]) => count > 0)
-    .sort((a, b) => b[1] - a[1]);
+  const sortedReasons = Object.entries(reasonStats)
+    .filter(([_, stat]) => stat.count > 0 || stat.minutes > 0)
+    .sort((a, b) => b[1].minutes - a[1].minutes || b[1].count - a[1].count);
 
-  const totalReasonsSum = sortedReasons.reduce((acc, [_, count]) => acc + count, 0) || 1;
-  const maxReasonCount = sortedReasons.length > 0 ? sortedReasons[0][1] : 1;
+  const totalReasonsMetric = sortedReasons.reduce((acc, [_, s]) => acc + (s.minutes > 0 ? s.minutes : s.count), 0) || 1;
+  const maxReasonMetric = sortedReasons.length > 0 ? (sortedReasons[0][1].minutes > 0 ? sortedReasons[0][1].minutes : sortedReasons[0][1].count) : 1;
   let cumulative = 0;
 
   if (sortedReasons.length === 0) {
-    dashboardRows.push(['Nenhuma Parada Registrada no Período', 0, '░░░░░░░░░░░░░░░░', '0%', '0%', '🟢 Operação 100% Contínua']);
+    dashboardRows.push(['Nenhuma Parada Registrada no Período', '0', '░░░░░░░░░░░░░░░░', '0%', '0%', '🟢 Operação 100% Contínua']);
   } else {
-    sortedReasons.forEach(([reason, count]) => {
-      const pct = (count / totalReasonsSum) * 100;
+    sortedReasons.forEach(([reason, stat]) => {
+      const metric = stat.minutes > 0 ? stat.minutes : stat.count;
+      const pct = (metric / totalReasonsMetric) * 100;
       cumulative += pct;
-      const paretoBar = generateVisualBar(count, maxReasonCount, 16);
+      const paretoBar = generateVisualBar(metric, maxReasonMetric, 16);
       let severity = '🟡 Moderado';
       if (pct >= 30) severity = '🔴 Alto Impacto (Prioridade)';
       else if (pct <= 10) severity = '🟢 Baixo Impacto';
 
       dashboardRows.push([
         reason,
-        count,
-        `${paretoBar} (${count})`,
+        `${stat.count}x (${formatMinutesToHoursAndMins(stat.minutes)})`,
+        `${paretoBar} (${stat.minutes} min)`,
         `${pct.toFixed(1)}%`,
         `${Math.min(100, cumulative).toFixed(1)}%`,
         severity
@@ -313,12 +329,13 @@ export function exportMonthlyReportToExcel(
     totalKgh: number;
     conformingCount: number;
     stopsCount: number;
+    stopMins: number;
   }>();
 
   monthRecords.forEach(r => {
     const op = r.operatorName || 'Não Identificado';
     if (!operatorMap.has(op)) {
-      operatorMap.set(op, { count: 0, prodCount: 0, totalKgh: 0, conformingCount: 0, stopsCount: 0 });
+      operatorMap.set(op, { count: 0, prodCount: 0, totalKgh: 0, conformingCount: 0, stopsCount: 0, stopMins: 0 });
     }
     const entry = operatorMap.get(op)!;
     entry.count += 1;
@@ -331,8 +348,10 @@ export function exportMonthlyReportToExcel(
         entry.conformingCount += 1;
       }
     }
-    if (r.hasStoppage) {
-      entry.stopsCount += r.stoppageQuantity || 1;
+    const stopDetails = getRecordStoppageDetails(r);
+    if (stopDetails.totalStopsCount > 0 || stopDetails.totalStopMinutes > 0) {
+      entry.stopsCount += stopDetails.totalStopsCount;
+      entry.stopMins += stopDetails.totalStopMinutes;
     }
   });
 
@@ -357,7 +376,7 @@ export function exportMonthlyReportToExcel(
         `${op.avgKgh} kg/h`,
         `${generateVisualBar(op.avgKgh, 500, 14)}`,
         `${op.confRate}% Conforme`,
-        `${op.stopsCount} parada(s)`
+        `${op.stopsCount} parada(s) (${formatMinutesToHoursAndMins(op.stopMins)})`
       ]);
     });
   }
@@ -463,11 +482,12 @@ export function exportMonthlyReportToExcel(
     const tons = Math.round((kg / 1000) * 10) / 10;
     const cSheets = prod.filter(r => r.temperaturesConforming && r.parametersMatchPreviousSheet).length;
     const cRate = prod.length > 0 ? Math.round((cSheets / prod.length) * 100) : 100;
-    const pStops = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+    const pStops = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+    const pStopMinutes = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
     const omCount = recs.filter(r => r.lineStatus === 'manutencao' || r.hasMaintenanceOrder).length;
 
     let reliability = '⭐⭐⭐⭐⭐ Excelente';
-    if (omCount >= 2 || pStops >= 3) reliability = '⭐⭐ Atenção Imediata';
+    if (omCount >= 2 || pStops >= 3 || pStopMinutes >= 180) reliability = '⭐⭐ Atenção Imediata';
     else if (omCount >= 1 || pStops >= 1) reliability = '⭐⭐⭐⭐ Regular';
 
     lineDetailsRows.push([
@@ -479,7 +499,7 @@ export function exportMonthlyReportToExcel(
       pAvg > 0 ? `${(pAvg - factoryGoals.targetAverageProductivityKgh).toFixed(1)} kg/h` : 'N/A',
       tons,
       `${cRate}%`,
-      pStops * 2.5, // 2.5h estimadas por parada
+      `${Math.round((pStopMinutes / 60) * 100) / 100}h (${pStopMinutes} min)`,
       pStops,
       omCount,
       reliability
@@ -660,9 +680,14 @@ export function exportMonthlyReportToExcel(
     'Líder Notificado',
     'Orientação do Líder',
     'Houve Parada?',
-    'Qtd de Paradas',
-    'Motivos das Paradas',
+    'Qtd Paradas Máquina',
+    'Tempo Parada Máquina (min)',
+    'Horários e Motivos (Máquina)',
     'Ordem de Manutenção (OM)',
+    'Qtd Paradas OM',
+    'Tempo Parada OM (min)',
+    'Horários e Motivos (OM)',
+    'Tempo Total Parado (min)',
     'Material em Setup',
     'Relato de Desvios Operacionais',
     'Tempo de Análise (s)',
@@ -672,63 +697,78 @@ export function exportMonthlyReportToExcel(
     'Qtd Evidências Fotográficas'
   ];
 
-  const detailRows = monthRecords.map(r => [
-    r.id,
-    new Date(r.timestamp).toLocaleString('pt-BR'),
-    r.machineId,
-    r.lineStatus || 'em_producao',
-    r.shift,
-    r.operatorName,
-    r.shiftLeader,
-    r.unableToAnalyzeReason || '',
-    r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
-    r.estimatedAnalysisTimeInShift || '',
-    r.productionOrder || '',
-    r.batchNumber || '',
-    r.productName || '',
-    r.productivityKgh ?? '',
-    r.targetProductivityKgh ?? '',
-    r.rpm ?? '',
-    r.motorAmperes ?? '',
-    r.hasPreviousReferenceSheet ? 'Sim' : 'Não (Sem Ref.)',
-    r.prevProductivityKgh ?? '',
-    r.prevRpm ?? '',
-    r.prevMotorAmperes ?? '',
-    r.temperaturesConforming ? 'Conforme' : (r.temperaturesConforming === false ? 'Desvio' : ''),
-    r.temperatureDeviationZones || '',
-    r.dopObservationsIdentified ? 'Sim' : 'Não',
-    r.deviationApprovedByLeader ? 'Aprovado' : 'Pendente/N/A',
-    r.dosers?.dos01?.value || '',
-    r.dosers?.dos02?.value || '',
-    r.dosers?.dos03?.value || '',
-    r.dosers?.dos04?.value || '',
-    r.dos02Homogenization || '',
-    r.sideFeederCurrentRpm ?? '',
-    r.sideFeederPreviousRpm ?? '',
-    r.circulationSystemStatus || 'ativo',
-    r.magnetStatus || '',
-    r.sievePowderCondition || '',
-    r.sealerTempConforming ? 'Correta' : (r.sealerTempConforming === false ? 'Incorreta' : ''),
-    r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' && r.scaleCalibrationStatus !== 'sem_etiqueta' ? 'Válida / Conforme' : `Desvio (${r.scaleCalibrationStatus || 'Incorreta'})`,
-    r.scaleTagNumber || `BAL-${r.machineId}`,
-    r.labelCodesConforming ? 'Conforme' : (r.labelCodesConforming === false ? 'Divergente' : ''),
-    r.sealingQuality || '',
-    r.deviationReportedToLeader ? 'Sim' : 'Não',
-    r.deviationReportTime || '',
-    r.deviationReportLeaderName || '',
-    r.deviationReportLeaderNotes || '',
-    r.hasStoppage ? 'Sim' : 'Não',
-    r.stoppageQuantity || (r.hasStoppage ? 1 : 0),
-    (r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || ''),
-    r.maintenanceOrderNumber || '',
-    r.setupMaterial || '',
-    r.operationalDeviationsNotes || '',
-    r.analysisDurationSeconds ?? 0,
-    formatAnalysisDuration(r.analysisDurationSeconds),
-    analyzeRecordDeviations(r).map(d => d.label).join('; ') || 'Conforme',
-    DOCUMENT_IDENTIFIER,
-    r.photos ? r.photos.length : 0
-  ]);
+  const detailRows = monthRecords.map(r => {
+    const details = getRecordStoppageDetails(r);
+    const machineText = details.machineStoppages.length > 0
+      ? details.machineStoppages.map((s, idx) => `#${idx + 1} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+      : ((r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || ''));
+    const omText = details.omStoppages.length > 0
+      ? details.omStoppages.map((s, idx) => `#${idx + 1} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+      : (r.hasMaintenanceOrder || r.lineStatus === 'manutencao' ? (r.maintenanceOrderNumber || 'OM') : '');
+
+    return [
+      r.id,
+      new Date(r.timestamp).toLocaleString('pt-BR'),
+      r.machineId,
+      r.lineStatus || 'em_producao',
+      r.shift,
+      r.operatorName,
+      r.shiftLeader,
+      r.unableToAnalyzeReason || '',
+      r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
+      r.estimatedAnalysisTimeInShift || '',
+      r.productionOrder || '',
+      r.batchNumber || '',
+      r.productName || '',
+      r.productivityKgh ?? '',
+      r.targetProductivityKgh ?? '',
+      r.rpm ?? '',
+      r.motorAmperes ?? '',
+      r.hasPreviousReferenceSheet ? 'Sim' : 'Não (Sem Ref.)',
+      r.prevProductivityKgh ?? '',
+      r.prevRpm ?? '',
+      r.prevMotorAmperes ?? '',
+      r.temperaturesConforming ? 'Conforme' : (r.temperaturesConforming === false ? 'Desvio' : ''),
+      r.temperatureDeviationZones || '',
+      r.dopObservationsIdentified ? 'Sim' : 'Não',
+      r.deviationApprovedByLeader ? 'Aprovado' : 'Pendente/N/A',
+      r.dosers?.dos01?.value || '',
+      r.dosers?.dos02?.value || '',
+      r.dosers?.dos03?.value || '',
+      r.dosers?.dos04?.value || '',
+      r.dos02Homogenization || '',
+      r.sideFeederCurrentRpm ?? '',
+      r.sideFeederPreviousRpm ?? '',
+      r.circulationSystemStatus || 'ativo',
+      r.magnetStatus || '',
+      r.sievePowderCondition || '',
+      r.sealerTempConforming ? 'Correta' : (r.sealerTempConforming === false ? 'Incorreta' : ''),
+      r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' && r.scaleCalibrationStatus !== 'sem_etiqueta' ? 'Válida / Conforme' : `Desvio (${r.scaleCalibrationStatus || 'Incorreta'})`,
+      r.scaleTagNumber || `BAL-${r.machineId}`,
+      r.labelCodesConforming ? 'Conforme' : (r.labelCodesConforming === false ? 'Divergente' : ''),
+      r.sealingQuality || '',
+      r.deviationReportedToLeader ? 'Sim' : 'Não',
+      r.deviationReportTime || '',
+      r.deviationReportLeaderName || '',
+      r.deviationReportLeaderNotes || '',
+      r.hasStoppage ? 'Sim' : 'Não',
+      details.machineStopsCount,
+      details.machineStopMinutes,
+      machineText,
+      r.maintenanceOrderNumber || '',
+      details.omStopsCount,
+      details.omStopMinutes,
+      omText,
+      details.totalStopMinutes,
+      r.setupMaterial || '',
+      r.operationalDeviationsNotes || '',
+      r.analysisDurationSeconds ?? 0,
+      formatAnalysisDuration(r.analysisDurationSeconds),
+      analyzeRecordDeviations(r).map(d => d.label).join('; ') || 'Conforme',
+      DOCUMENT_IDENTIFIER,
+      r.photos ? r.photos.length : 0
+    ];
+  });
 
   const wsDetails = XLSX.utils.aoa_to_sheet([headersDetail, ...detailRows]);
   wsDetails['!cols'] = headersDetail.map(() => ({ wch: 18 }));
@@ -784,7 +824,8 @@ export function exportDailyReportToExcel(
     ? Math.round((conformingSheets / prodRecords.length) * 100)
     : 100;
 
-  const totalStoppagesQty = dayRecords.reduce((acc, r) => acc + (r.stoppageQuantity || (r.hasStoppage ? 1 : 0)), 0);
+  const totalStoppagesQty = dayRecords.reduce((acc, r) => acc + getRecordStoppageDetails(r).totalStopsCount, 0);
+  const totalDayStoppageMinutes = dayRecords.reduce((acc, r) => acc + getRecordStoppageDetails(r).totalStopMinutes, 0);
 
   const conformingLabels = prodRecords.filter(r => r.labelCodesConforming && r.sealingQuality === 'conforme').length;
   const labelComplianceRate = prodRecords.length > 0
@@ -844,11 +885,11 @@ export function exportDailyReportToExcel(
     ],
     [
       'Total de Paradas Registradas no Dia',
-      `${totalStoppagesQty} parada(s)`,
+      `${totalStoppagesQty} parada(s) • ${formatMinutesToHoursAndMins(totalDayStoppageMinutes)}`,
       '0 toleradas',
-      totalStoppagesQty === 0 ? '██████████████ 100% (Sem paradas)' : `${generateVisualBar(Math.max(0, 10 - totalStoppagesQty), 10, 14)} ${totalStoppagesQty} evento(s)`,
+      totalStoppagesQty === 0 ? '██████████████ 100% (Sem paradas)' : `${generateVisualBar(Math.max(0, 10 - totalStoppagesQty), 10, 14)} ${totalDayStoppageMinutes} min perdidos`,
       totalStoppagesQty === 0 ? '🟢 OPERAÇÃO CONTÍNUA' : '🔴 PARADAS REGISTRADAS',
-      totalStoppagesQty > 0 ? `+${totalStoppagesQty} evento(s)` : '0'
+      totalStoppagesQty > 0 ? `+${totalStoppagesQty} evento(s) (${totalDayStoppageMinutes} min)` : '0'
     ],
     [
       'Desvios Comunicados ao Líder',
@@ -876,7 +917,8 @@ export function exportDailyReportToExcel(
       : 0;
     
     const shiftKg = shiftActive.reduce((a, b) => a + ((b.productivityKgh || 0) * 4), 0);
-    const shiftStoppages = shiftRecs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+    const shiftStoppages = shiftRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+    const shiftStopMins = shiftRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
     
     const shiftConform = shiftProd.length > 0
       ? Math.round((shiftProd.filter(r => r.temperaturesConforming && r.parametersMatchPreviousSheet).length / shiftProd.length) * 100)
@@ -888,7 +930,7 @@ export function exportDailyReportToExcel(
       shiftKg.toLocaleString('pt-BR'),
       `${shiftAvgKgh} kg/h`,
       `${generateVisualBar(shiftAvgKgh, factoryGoals.targetAverageProductivityKgh, 12)} ${shiftAvgKgh > 0 ? Math.round((shiftAvgKgh / factoryGoals.targetAverageProductivityKgh) * 100) : 0}%`,
-      shiftStoppages,
+      `${shiftStoppages} (${formatMinutesToHoursAndMins(shiftStopMins)})`,
       `${shiftConform}%`
     ]);
   }
@@ -1035,7 +1077,8 @@ export function exportDailyReportToExcel(
       ? Math.round((mActive.reduce((a, b) => a + (b.motorAmperes || 0), 0) / mActive.length) * 10) / 10
       : 0;
 
-    const mStoppages = mRecs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+    const mStoppages = mRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+    const mStopMinutes = mRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
 
     // Identificar status predominante
     let predStatus = 'Sem Registro no Dia';
@@ -1067,7 +1110,7 @@ export function exportDailyReportToExcel(
       generateVisualBar(mAvgKgh, mTargetKgh, 14),
       mAvgRpm > 0 ? `${mAvgRpm} rpm` : '-',
       mAvgAmp > 0 ? `${mAvgAmp} A` : '-',
-      mStoppages,
+      `${mStoppages} (${formatMinutesToHoursAndMins(mStopMinutes)})`,
       lastProduct
     ]);
   }
@@ -1113,6 +1156,10 @@ export function exportDailyReportToExcel(
   } else {
     for (const r of problemRecords) {
       const timeStr = new Date(r.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const stopDetails = getRecordStoppageDetails(r);
+      const formattedStops = stopDetails.allEntries.length > 0
+        ? stopDetails.allEntries.map((s, idx) => `${s.category === 'om' ? '[OM]' : `#${idx + 1}`} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+        : '';
       
       let eventType = 'Desvio Operacional';
       let details = r.operationalDeviationsNotes || '';
@@ -1121,17 +1168,17 @@ export function exportDailyReportToExcel(
         eventType = 'Análise Impossibilitada';
         details = `Motivo: ${r.unableToAnalyzeReason || 'Não detalhado'} | Reanálise no turno: ${r.canAnalyzeInCurrentShift ? `SIM (${r.estimatedAnalysisTimeInShift || 'prevista'})` : 'NÃO'}`;
       } else if (r.lineStatus === 'manutencao') {
-        eventType = `Manutenção (OM: ${r.maintenanceOrderNumber || 'S/N'})`;
-        details = r.operationalDeviationsNotes || 'Intervenção técnica corretiva';
+        eventType = `Manutenção (OM: ${r.maintenanceOrderNumber || 'S/N'} • ${stopDetails.omStopsCount} par. / ${formatMinutesToHoursAndMins(stopDetails.omStopMinutes)})`;
+        details = formattedStops ? `${formattedStops}${r.operationalDeviationsNotes ? ` | Obs: ${r.operationalDeviationsNotes}` : ''}` : (r.operationalDeviationsNotes || 'Intervenção técnica corretiva');
       } else if (r.lineStatus === 'setup') {
         eventType = 'Troca de Matriz / Setup';
         details = `Material: ${r.setupMaterial || 'Não especificado'}`;
-      } else if (r.hasStoppage) {
-        const reasons = (r.stoppageReasonsList && r.stoppageReasonsList.length > 0) 
+      } else if (r.hasStoppage || stopDetails.totalStopsCount > 0) {
+        const reasons = formattedStops || ((r.stoppageReasonsList && r.stoppageReasonsList.length > 0) 
           ? r.stoppageReasonsList.join(', ') 
-          : (r.stoppageReason || 'Ajuste Geral');
-        eventType = `Parada de Máquina (Qtd: ${r.stoppageQuantity || 1})`;
-        details = `Motivo: ${reasons}. ${r.operationalDeviationsNotes || ''}`;
+          : (r.stoppageReason || 'Ajuste Geral'));
+        eventType = `Parada de Máquina (${stopDetails.totalStopsCount}x • ${formatMinutesToHoursAndMins(stopDetails.totalStopMinutes)})`;
+        details = `Horários/Motivos: ${reasons}${r.operationalDeviationsNotes ? ` | Obs: ${r.operationalDeviationsNotes}` : ''}`;
       } else if (!r.temperaturesConforming) {
         eventType = 'Desvio Térmico';
         details = `Zonas: ${r.temperatureDeviationZones || 'Não conformes'}`;
@@ -1216,9 +1263,14 @@ export function exportDailyReportToExcel(
     'Nome do Líder',
     'Parecer do Líder',
     'Houve Parada?',
-    'Qtd Paradas',
-    'Motivos das Paradas',
+    'Qtd Paradas Máquina',
+    'Tempo Parada Máquina (min)',
+    'Horários e Motivos (Máquina)',
     'Número OM',
+    'Qtd Paradas OM',
+    'Tempo Parada OM (min)',
+    'Horários e Motivos (OM)',
+    'Tempo Total Parado (min)',
     'Material em Setup',
     'Desvios Operacionais',
     'Tempo de Análise (s)',
@@ -1228,63 +1280,78 @@ export function exportDailyReportToExcel(
     'Fotos'
   ];
 
-  const detailRows = dayRecords.map(r => [
-    r.id,
-    new Date(r.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    r.machineId,
-    r.lineStatus || 'em_producao',
-    r.shift,
-    r.operatorName,
-    r.shiftLeader,
-    r.unableToAnalyzeReason || '',
-    r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
-    r.estimatedAnalysisTimeInShift || '',
-    r.productionOrder || '',
-    r.batchNumber || '',
-    r.productName || '',
-    r.productivityKgh ?? '',
-    r.targetProductivityKgh ?? '',
-    r.rpm ?? '',
-    r.motorAmperes ?? '',
-    r.hasPreviousReferenceSheet ? 'Sim' : 'Não (Sem Ref.)',
-    r.prevProductivityKgh ?? '',
-    r.prevRpm ?? '',
-    r.prevMotorAmperes ?? '',
-    r.temperaturesConforming ? 'Conforme' : (r.temperaturesConforming === false ? 'Desvio' : ''),
-    r.temperatureDeviationZones || '',
-    r.dopObservationsIdentified ? 'Sim' : 'Não',
-    r.deviationApprovedByLeader ? 'Aprovado' : 'Pendente/N/A',
-    r.dosers?.dos01?.value || '',
-    r.dosers?.dos02?.value || '',
-    r.dosers?.dos03?.value || '',
-    r.dosers?.dos04?.value || '',
-    r.dos02Homogenization || '',
-    r.sideFeederCurrentRpm ?? '',
-    r.sideFeederPreviousRpm ?? '',
-    r.circulationSystemStatus || 'ativo',
-    r.magnetStatus || '',
-    r.sievePowderCondition || '',
-    r.sealerTempConforming ? 'Correta' : (r.sealerTempConforming === false ? 'Incorreta' : ''),
-    r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' && r.scaleCalibrationStatus !== 'sem_etiqueta' ? 'Válida / Conforme' : `Desvio (${r.scaleCalibrationStatus || 'Incorreta'})`,
-    r.scaleTagNumber || `BAL-${r.machineId}`,
-    r.labelCodesConforming ? 'Conforme' : (r.labelCodesConforming === false ? 'Divergente' : ''),
-    r.sealingQuality || '',
-    r.deviationReportedToLeader ? 'Sim' : 'Não',
-    r.deviationReportTime || '',
-    r.deviationReportLeaderName || '',
-    r.deviationReportLeaderNotes || '',
-    r.hasStoppage ? 'Sim' : 'Não',
-    r.stoppageQuantity || (r.hasStoppage ? 1 : 0),
-    (r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || ''),
-    r.maintenanceOrderNumber || '',
-    r.setupMaterial || '',
-    r.operationalDeviationsNotes || '',
-    r.analysisDurationSeconds ?? 0,
-    formatAnalysisDuration(r.analysisDurationSeconds),
-    analyzeRecordDeviations(r).map(d => d.label).join('; ') || 'Conforme',
-    DOCUMENT_IDENTIFIER,
-    r.photos ? r.photos.length : 0
-  ]);
+  const detailRows = dayRecords.map(r => {
+    const details = getRecordStoppageDetails(r);
+    const machineText = details.machineStoppages.length > 0
+      ? details.machineStoppages.map((s, idx) => `#${idx + 1} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+      : ((r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || ''));
+    const omText = details.omStoppages.length > 0
+      ? details.omStoppages.map((s, idx) => `#${idx + 1} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+      : (r.hasMaintenanceOrder || r.lineStatus === 'manutencao' ? (r.maintenanceOrderNumber || 'OM') : '');
+
+    return [
+      r.id,
+      new Date(r.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      r.machineId,
+      r.lineStatus || 'em_producao',
+      r.shift,
+      r.operatorName,
+      r.shiftLeader,
+      r.unableToAnalyzeReason || '',
+      r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
+      r.estimatedAnalysisTimeInShift || '',
+      r.productionOrder || '',
+      r.batchNumber || '',
+      r.productName || '',
+      r.productivityKgh ?? '',
+      r.targetProductivityKgh ?? '',
+      r.rpm ?? '',
+      r.motorAmperes ?? '',
+      r.hasPreviousReferenceSheet ? 'Sim' : 'Não (Sem Ref.)',
+      r.prevProductivityKgh ?? '',
+      r.prevRpm ?? '',
+      r.prevMotorAmperes ?? '',
+      r.temperaturesConforming ? 'Conforme' : (r.temperaturesConforming === false ? 'Desvio' : ''),
+      r.temperatureDeviationZones || '',
+      r.dopObservationsIdentified ? 'Sim' : 'Não',
+      r.deviationApprovedByLeader ? 'Aprovado' : 'Pendente/N/A',
+      r.dosers?.dos01?.value || '',
+      r.dosers?.dos02?.value || '',
+      r.dosers?.dos03?.value || '',
+      r.dosers?.dos04?.value || '',
+      r.dos02Homogenization || '',
+      r.sideFeederCurrentRpm ?? '',
+      r.sideFeederPreviousRpm ?? '',
+      r.circulationSystemStatus || 'ativo',
+      r.magnetStatus || '',
+      r.sievePowderCondition || '',
+      r.sealerTempConforming ? 'Correta' : (r.sealerTempConforming === false ? 'Incorreta' : ''),
+      r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' && r.scaleCalibrationStatus !== 'sem_etiqueta' ? 'Válida / Conforme' : `Desvio (${r.scaleCalibrationStatus || 'Incorreta'})`,
+      r.scaleTagNumber || `BAL-${r.machineId}`,
+      r.labelCodesConforming ? 'Conforme' : (r.labelCodesConforming === false ? 'Divergente' : ''),
+      r.sealingQuality || '',
+      r.deviationReportedToLeader ? 'Sim' : 'Não',
+      r.deviationReportTime || '',
+      r.deviationReportLeaderName || '',
+      r.deviationReportLeaderNotes || '',
+      r.hasStoppage ? 'Sim' : 'Não',
+      details.machineStopsCount,
+      details.machineStopMinutes,
+      machineText,
+      r.maintenanceOrderNumber || '',
+      details.omStopsCount,
+      details.omStopMinutes,
+      omText,
+      details.totalStopMinutes,
+      r.setupMaterial || '',
+      r.operationalDeviationsNotes || '',
+      r.analysisDurationSeconds ?? 0,
+      formatAnalysisDuration(r.analysisDurationSeconds),
+      analyzeRecordDeviations(r).map(d => d.label).join('; ') || 'Conforme',
+      DOCUMENT_IDENTIFIER,
+      r.photos ? r.photos.length : 0
+    ];
+  });
 
   const wsDetails = XLSX.utils.aoa_to_sheet([headersDetail, ...detailRows]);
   wsDetails['!cols'] = headersDetail.map(() => ({ wch: 18 }));
@@ -1344,7 +1411,9 @@ export function exportPowerBIVisualExcel(
   const conformingPackaging = prodRecords.filter(r => r.labelCodesConforming && r.sealingQuality === 'conforme').length;
   const packagingCompliance = prodRecords.length > 0 ? Math.round((conformingPackaging / prodRecords.length) * 100) : 100;
 
-  const totalStoppages = filtered.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+  const totalStoppages = filtered.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+  const totalStopMinutes = filtered.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
+  const totalOmMinutes = filtered.reduce((a, b) => a + getRecordStoppageDetails(b).omStopMinutes, 0);
   const totalOMs = filtered.filter(r => r.lineStatus === 'manutencao' || r.hasMaintenanceOrder).length;
   const totalSetups = filtered.filter(r => r.lineStatus === 'setup').length;
 
@@ -1364,7 +1433,8 @@ export function exportPowerBIVisualExcel(
     const attainment = targetKgh > 0 ? Math.round((avgKgh / targetKgh) * 100) : 0;
     const latest = recs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
     const status = latest?.lineStatus || (recs.length > 0 ? 'em_producao' : 'inativa');
-    const stops = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+    const stops = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+    const stopMins = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
     const lastOP = latest?.productionOrder || 'Sem OP';
 
     const realWidth = Math.min(100, Math.round((avgKgh / maxScale) * 100));
@@ -1378,22 +1448,25 @@ export function exportPowerBIVisualExcel(
       realWidth,
       status,
       stops,
+      stopMins,
       lastOP
     };
   });
 
   // Operadores
-  const opMap = new Map<string, { totalKgh: number; prodCount: number; totalRecs: number; confCount: number; stopMins: number }>();
+  const opMap = new Map<string, { totalKgh: number; prodCount: number; totalRecs: number; confCount: number; stopMins: number; stopsCount: number }>();
   for (const r of filtered) {
     const name = r.operatorName || 'Operador';
-    const cur = opMap.get(name) || { totalKgh: 0, prodCount: 0, totalRecs: 0, confCount: 0, stopMins: 0 };
+    const cur = opMap.get(name) || { totalKgh: 0, prodCount: 0, totalRecs: 0, confCount: 0, stopMins: 0, stopsCount: 0 };
     cur.totalRecs += 1;
     if (r.lineStatus === 'em_producao') {
       cur.prodCount += 1;
       if (!r.hasStoppage && (r.productivityKgh || 0) > 0) cur.totalKgh += r.productivityKgh || 0;
       if (r.temperaturesConforming && r.parametersMatchPreviousSheet) cur.confCount += 1;
     }
-    if (r.hasStoppage) cur.stopMins += r.stoppageMinutes || 60;
+    const stopDetails = getRecordStoppageDetails(r);
+    cur.stopsCount += stopDetails.totalStopsCount;
+    cur.stopMins += stopDetails.totalStopMinutes;
     opMap.set(name, cur);
   }
 
@@ -1401,17 +1474,46 @@ export function exportPowerBIVisualExcel(
     const avgKgh = d.prodCount > 0 ? Math.round(d.totalKgh / d.prodCount) : 0;
     const conf = d.prodCount > 0 ? Math.round((d.confCount / d.prodCount) * 100) : 100;
     const barWidth = Math.min(100, Math.round((avgKgh / maxScale) * 100));
-    return { name, avgKgh, conf, totalRecs: d.totalRecs, stopMins: d.stopMins, barWidth };
+    return { name, avgKgh, conf, totalRecs: d.totalRecs, stopMins: d.stopMins, stopsCount: d.stopsCount, barWidth };
   }).sort((a, b) => b.avgKgh - a.avgKgh);
 
   // Pareto de Intervenções
   let manMins = 0; let prevMins = 0; let setMins = 0; let outMins = 0;
+  const paretoReasonMap: Record<string, { count: number; minutes: number }> = {};
   for (const r of filtered) {
-    if (r.lineStatus === 'manutencao' || r.hasMaintenanceOrder) manMins += r.stoppageMinutes || 240;
-    else if (r.lineStatus === 'preventiva') prevMins += r.stoppageMinutes || 180;
-    else if (r.lineStatus === 'setup') setMins += r.stoppageMinutes || 90;
-    else if (r.hasStoppage) outMins += r.stoppageMinutes || 45;
+    const details = getRecordStoppageDetails(r);
+    if (r.lineStatus === 'manutencao' || r.hasMaintenanceOrder) {
+      manMins += details.omStopMinutes || (r.lineStatus === 'manutencao' ? (r.stoppageMinutes || 240) : 0);
+    }
+    if (r.lineStatus === 'preventiva') {
+      prevMins += details.totalStopMinutes || r.stoppageMinutes || 180;
+    } else if (r.lineStatus === 'setup') {
+      setMins += details.totalStopMinutes || r.stoppageMinutes || 90;
+    } else if (details.machineStopMinutes > 0 || r.hasStoppage) {
+      outMins += details.machineStopMinutes || r.stoppageMinutes || 0;
+    }
+
+    if (details.allEntries.length > 0) {
+      for (const entry of details.allEntries) {
+        const key = entry.category === 'om' ? `OM: ${entry.reason || 'Manutenção Corretiva'}` : (entry.reason || 'Outro');
+        if (!paretoReasonMap[key]) paretoReasonMap[key] = { count: 0, minutes: 0 };
+        paretoReasonMap[key].count += 1;
+        paretoReasonMap[key].minutes += entry.durationMinutes;
+      }
+    } else if (r.hasStoppage) {
+      const key = (r.stoppageReasonsList && r.stoppageReasonsList.length > 0)
+        ? r.stoppageReasonsList.join(', ')
+        : (r.stoppageReason || 'Ajuste de Processo');
+      if (!paretoReasonMap[key]) paretoReasonMap[key] = { count: 0, minutes: 0 };
+      paretoReasonMap[key].count += details.totalStopsCount || 1;
+      paretoReasonMap[key].minutes += details.totalStopMinutes || r.stoppageMinutes || 0;
+    }
   }
+  const paretoEntries = Object.entries(paretoReasonMap)
+    .map(([reason, d]) => ({ reason, ...d }))
+    .sort((a, b) => b.minutes - a.minutes || b.count - a.count)
+    .slice(0, 5);
+  const paretoTotalMetric = paretoEntries.reduce((acc, item) => acc + (item.minutes > 0 ? item.minutes : item.count), 0) || 1;
   const maxInterv = Math.max(1, manMins, prevMins, setMins, outMins);
 
   // Ocorrências
@@ -1491,8 +1593,9 @@ export function exportPowerBIVisualExcel(
     const sAvg = sRunning.length > 0 ? Math.round(sRunning.reduce((a, b) => a + (b.productivityKgh || 0), 0) / sRunning.length) : 0;
     const sKg = sRunning.reduce((a, b) => a + ((b.productivityKgh || 0) * 4), 0);
     const sShare = totalKg > 0 ? Math.round((sKg / totalKg) * 100) : 0;
-    const sStops = sRecs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
-    return { ...s, sAvg, sKg, sShare, sStops };
+    const sStops = sRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+    const sStopMins = sRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
+    return { ...s, sAvg, sKg, sShare, sStops, sStopMins };
   });
 
   // Helper para renderizar barras de progresso que funcionam 100% em QUALQUER versão do Microsoft Excel
@@ -1659,25 +1762,25 @@ export function exportPowerBIVisualExcel(
                 <td><font color="#ef4444" size="1"><b>⚠ PARADAS & OCORRÊNCIAS</b></font></td>
                 <td align="right">
                   <table cellpadding="3" cellspacing="0" border="0" bgcolor="#3b0764">
-                    <tr><td style="border:1px solid #6b21a8;"><font color="#d8b4fe" size="1"><b>Linha Parada</b></font></td></tr>
+                    <tr><td style="border:1px solid #6b21a8;"><font color="#d8b4fe" size="1"><b>${totalStoppages} evento(s)</b></font></td></tr>
                   </table>
                 </td>
               </tr>
               <tr>
                 <td colspan="2" style="padding-top:8px; padding-bottom:6px;">
-                  <font size="6" color="#ef4444"><b>${totalStoppages}</b></font> <font size="2" color="#94a3b8">evento(s)</font>
+                  <font size="6" color="#ef4444"><b>${formatMinutesToHoursAndMins(totalStopMinutes)}</b></font> <font size="2" color="#94a3b8">(${totalStopMinutes} min)</font>
                 </td>
               </tr>
               <tr>
-                <td><font size="1" color="#94a3b8">Ordens Manutenção (OM): <b style="color:#ffffff;">${totalOMs}</b></font></td>
+                <td><font size="1" color="#94a3b8">OMs: <b style="color:#ffffff;">${totalOMs} (${formatMinutesToHoursAndMins(totalOmMinutes)})</b></font></td>
                 <td align="right"><font size="1" color="#cbd5e1">Setups: <b style="color:#ffffff;">${totalSetups}</b></font></td>
               </tr>
               <tr>
                 <td colspan="2" style="padding-top:8px; border-top:1px solid #1e293b; margin-top:6px;">
                   <table width="100%" cellpadding="0" cellspacing="0" border="0">
                     <tr>
-                      <td><font size="1" color="#94a3b8">Disponibilidade Mecânica:</font></td>
-                      <td align="right"><font size="1" color="#4ade80"><b>Monitorada</b></font></td>
+                      <td><font size="1" color="#94a3b8">Apontamento Cronometrado:</font></td>
+                      <td align="right"><font size="1" color="#4ade80"><b>Tempo Exato</b></font></td>
                     </tr>
                   </table>
                 </td>
@@ -1744,7 +1847,7 @@ export function exportPowerBIVisualExcel(
                 <tr>
                   <td width="32%">
                     <font size="2" color="#0f172a"><b>${idx + 1}. ${op.name}</b></font><br>
-                    <font size="1" color="#94a3b8">${op.totalRecs} ap. • ${op.stopMins === 0 ? 'Zero paradas' : `${op.stopMins} min paradas`}</font>
+                    <font size="1" color="#94a3b8">${op.totalRecs} ap. • ${op.stopMins === 0 ? 'Zero paradas' : `${op.stopsCount} par. (${formatMinutesToHoursAndMins(op.stopMins)})`}</font>
                   </td>
                   <td width="40%">
                     ${renderExcelBar(op.barWidth, '#8b0000', '#f1f5f9', 10)}
@@ -2097,7 +2200,7 @@ export function exportPowerBIVisualExcel(
                     </td>
                     <td width="10%" align="center">
                       <font size="1" color="#94a3b8">PARADAS</font><br>
-                      <font size="2" color="${f.stops > 0 ? '#dc2626' : '#94a3b8'}"><b>${f.stops}</b></font>
+                      <font size="2" color="${f.stops > 0 ? '#dc2626' : '#94a3b8'}"><b>${f.stops} (${formatMinutesToHoursAndMins(f.stopMins)})</b></font>
                     </td>
                     <td width="10%" align="right">
                       <font size="1" color="#94a3b8">ÚLTIMA OP</font><br>
@@ -2126,7 +2229,7 @@ export function exportPowerBIVisualExcel(
                   <td>
                     <font size="2" color="#0f172a"><b>${s.name}</b>: ${s.sKg.toLocaleString('pt-BR')} kg (${s.sShare}%)</font>
                     ${renderExcelBar(s.sShare, s.color, '#f1f5f9', 10)}
-                    <font size="1" color="#64748b">Vazão: <b>${s.sAvg} kg/h</b> • ${s.sStops} parada(s)</font>
+                    <font size="1" color="#64748b">Vazão: <b>${s.sAvg} kg/h</b> • ${s.sStops} parada(s) (${formatMinutesToHoursAndMins(s.sStopMins)})</font>
                   </td>
                 </tr>
               `).join('')}
@@ -2137,19 +2240,36 @@ export function exportPowerBIVisualExcel(
               <tr>
                 <td>
                   <font size="2" color="#0f172a"><b>⚠ PARETO: PRINCIPAIS OFENSORES</b></font><br>
-                  <font size="1" color="#64748b">Curva de impacto cumulativo de paradas</font>
+                  <font size="1" color="#64748b">Curva de impacto cumulativo por tempo exato parado</font>
                 </td>
               </tr>
             </table>
 
             <table width="100%" cellpadding="4" cellspacing="0" border="0">
-              <tr>
-                <td>
-                  <font size="2" color="#0f172a"><b>1º Ajuste de Processo</b></font>
-                  <font size="1" color="#64748b"> 1x (100%) • Acum: 100%</font>
-                  ${renderExcelBar(100, '#8b0000', '#f1f5f9', 10)}
-                </td>
-              </tr>
+              ${paretoEntries.length === 0 ? `
+                <tr>
+                  <td>
+                    <font size="2" color="#15803d"><b>Nenhuma parada registrada no período</b></font>
+                    ${renderExcelBar(0, '#8b0000', '#f1f5f9', 10)}
+                  </td>
+                </tr>
+              ` : (() => {
+                let acum = 0;
+                return paretoEntries.map((item, idx) => {
+                  const metric = item.minutes > 0 ? item.minutes : item.count;
+                  const pct = Math.round((metric / paretoTotalMetric) * 100);
+                  acum = Math.min(100, acum + pct);
+                  return `
+                    <tr>
+                      <td>
+                        <font size="2" color="#0f172a"><b>${idx + 1}º ${item.reason}</b></font>
+                        <font size="1" color="#64748b"> ${item.count}x (${formatMinutesToHoursAndMins(item.minutes)}) • ${pct}% • Acum: ${acum}%</font>
+                        ${renderExcelBar(pct, '#8b0000', '#f1f5f9', 10)}
+                      </td>
+                    </tr>
+                  `;
+                }).join('');
+              })()}
             </table>
           </td>
         </tr>
@@ -2186,6 +2306,10 @@ export function exportPowerBIVisualExcel(
               <tbody>
                 ${filtered.map(r => {
                   const deviations = analyzeRecordDeviations(r);
+                  const stopDetails = getRecordStoppageDetails(r);
+                  const stopSummary = stopDetails.totalStopsCount > 0 || stopDetails.totalStopMinutes > 0
+                    ? `${stopDetails.totalStopsCount}x (${formatMinutesToHoursAndMins(stopDetails.totalStopMinutes)})`
+                    : '0';
                   const devLabel = deviations.length > 0 
                     ? `<font color="#dc2626"><b>${deviations.map(d => d.label).join(', ')}</b></font>`
                     : '<font color="#15803d">Conforme</font>';
@@ -2205,7 +2329,7 @@ export function exportPowerBIVisualExcel(
                     <td>${r.motorAmperes ?? '-'}</td>
                     <td>${r.temperaturesConforming ? 'Conforme' : 'Desvio'}</td>
                     <td>${r.scaleCalibrationConforming !== false && r.scaleCalibrationStatus !== 'vencida' ? `${r.scaleTagNumber || `BAL-${r.machineId}`} (OK)` : '<font color="#dc2626"><b>Desvio</b></font>'}</td>
-                    <td>${r.hasStoppage ? (r.stoppageQuantity || 1) : 0}</td>
+                    <td>${stopSummary}</td>
                     <td>${r.maintenanceOrderNumber || r.setupMaterial || '-'}</td>
                     <td><b>${formatAnalysisDuration(r.analysisDurationSeconds)}</b></td>
                     <td>${devLabel}</td>
@@ -2222,7 +2346,7 @@ export function exportPowerBIVisualExcel(
         <tr>
           <td>
             <font size="2" color="#fbbf24"><b>${DOCUMENT_IDENTIFIER}</b></font>
-            <font size="2" color="#94a3b8"> &nbsp;•&nbsp; PetroPol Polímeros Industriais Ltda. &nbsp;•&nbsp; Gestão e Análise de Processo &nbsp;•&nbsp; DR01 a DR06</font>
+            <font size="2" color="#94a3b8"> &nbsp;•&nbsp; PETROPOL POLÍMEROS &nbsp;•&nbsp; Gestão e Análise de Processo &nbsp;•&nbsp; DR01 a DR06</font>
           </td>
           <td align="right">
             <font size="1" color="#64748b">Tempo de Inspeção e Análise Rastreado Automaticamente</font>

@@ -2,7 +2,105 @@
  * Utilitários de Auditoria e Gestão de Desvios de Processo para o ExtruControl
  * Código de Referência Operacional: PE_RG_034 Análise de processo
  */
-import { ProductionRecord, MachineId, MACHINE_LIST } from '../types/production';
+import { ProductionRecord, MachineId, MACHINE_LIST, StoppageEntry } from '../types/production';
+
+export function calculateStoppageMinutes(startTime?: string, endTime?: string): number {
+  if (!startTime || !endTime) return 0;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => isNaN(n))) return 0;
+  const startTotal = sh * 60 + sm;
+  let endTotal = eh * 60 + em;
+  if (endTotal < startTotal) {
+    // Virada de turno noturno (ex: 23:40 -> 00:25)
+    endTotal += 24 * 60;
+  }
+  return Math.max(0, endTotal - startTotal);
+}
+
+export function formatMinutesToHoursAndMins(totalMinutes: number): string {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  if (mins === 0) return '0 min';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+export interface RecordStoppageDetails {
+  machineStoppages: StoppageEntry[];
+  omStoppages: StoppageEntry[];
+  machineStopsCount: number;
+  machineStopMinutes: number;
+  omStopsCount: number;
+  omStopMinutes: number;
+  totalStopsCount: number;
+  totalStopMinutes: number;
+  allEntries: Array<StoppageEntry & { category: 'maquina' | 'om' }>;
+}
+
+export function getRecordStoppageDetails(record: ProductionRecord): RecordStoppageDetails {
+  const normalize = (entries: StoppageEntry[] = []): StoppageEntry[] =>
+    entries.map((e) => ({
+      ...e,
+      durationMinutes:
+        e.startTime && e.endTime
+          ? calculateStoppageMinutes(e.startTime, e.endTime)
+          : e.durationMinutes || 0,
+    }));
+
+  const hasDetailedMachine = Array.isArray(record.stoppages) && record.stoppages.length > 0;
+  const hasDetailedOm = Array.isArray(record.maintenanceOrderStops) && record.maintenanceOrderStops.length > 0;
+
+  let machineStoppages: StoppageEntry[] = [];
+  let machineStopsCount = 0;
+  let machineStopMinutes = 0;
+
+  if (hasDetailedMachine) {
+    machineStoppages = normalize(record.stoppages);
+    machineStopsCount = machineStoppages.length;
+    machineStopMinutes = machineStoppages.reduce((sum, s) => sum + s.durationMinutes, 0);
+  } else if (record.hasStoppage && record.lineStatus !== 'manutencao') {
+    machineStopsCount = record.stoppageQuantity ?? (record.lineStatus === 'inativa' ? 0 : 1);
+    machineStopMinutes = record.stoppageMinutes ?? 0;
+  } else if (record.lineStatus === 'setup' || record.lineStatus === 'preventiva') {
+    machineStopsCount = record.stoppageQuantity || 1;
+    machineStopMinutes = record.stoppageMinutes ?? 0;
+  }
+
+  let omStoppages: StoppageEntry[] = [];
+  let omStopsCount = 0;
+  let omStopMinutes = 0;
+
+  if (hasDetailedOm) {
+    omStoppages = normalize(record.maintenanceOrderStops);
+    omStopsCount = omStoppages.length;
+    omStopMinutes = omStoppages.reduce((sum, s) => sum + s.durationMinutes, 0);
+  } else if (record.lineStatus === 'manutencao' || record.hasMaintenanceOrder) {
+    omStopsCount = record.maintenanceOrderStopQuantity || 1;
+    omStopMinutes =
+      record.maintenanceOrderTotalMinutes ??
+      (record.lineStatus === 'manutencao' ? record.stoppageMinutes ?? 0 : 0);
+  }
+
+  const allEntries: Array<StoppageEntry & { category: 'maquina' | 'om' }> = [
+    ...machineStoppages.map((s) => ({ ...s, category: 'maquina' as const })),
+    ...omStoppages.map((s) => ({ ...s, category: 'om' as const, omNumber: s.omNumber || record.maintenanceOrderNumber })),
+  ];
+
+  return {
+    machineStoppages,
+    omStoppages,
+    machineStopsCount,
+    machineStopMinutes,
+    omStopsCount,
+    omStopMinutes,
+    totalStopsCount: machineStopsCount + omStopsCount,
+    totalStopMinutes: machineStopMinutes + omStopMinutes,
+    allEntries,
+  };
+}
 
 export interface ProcessDeviationDetail {
   type: 
@@ -40,6 +138,7 @@ export interface LineDeviationReport {
  */
 export function analyzeRecordDeviations(record: ProductionRecord): ProcessDeviationDetail[] {
   const list: ProcessDeviationDetail[] = [];
+  const stopDetails = getRecordStoppageDetails(record);
 
   // 0. Linha com Análise Impossibilitada / Não Realizada
   if (record.lineStatus === 'nao_analisada') {
@@ -55,28 +154,36 @@ export function analyzeRecordDeviations(record: ProductionRecord): ProcessDeviat
 
   // 1. Manutenção Corretiva (OM)
   if (record.lineStatus === 'manutencao' || record.hasMaintenanceOrder) {
+    const omTimeInfo = stopDetails.omStoppages.length > 0
+      ? ` · ${stopDetails.omStopsCount} parada(s) (${formatMinutesToHoursAndMins(stopDetails.omStopMinutes)}): ${stopDetails.omStoppages.map(s => `${s.startTime}-${s.endTime} ${s.reason}`).join('; ')}`
+      : (stopDetails.omStopMinutes > 0 ? ` · ${formatMinutesToHoursAndMins(stopDetails.omStopMinutes)}` : '');
     list.push({
       type: 'manutencao',
       label: 'Ordem de Manutenção (OM)',
-      description: record.maintenanceOrderNumber 
+      description: (record.maintenanceOrderNumber 
         ? `OM: ${record.maintenanceOrderNumber}` 
-        : 'Intervenção técnica corretiva aberta',
+        : 'Intervenção técnica corretiva aberta') + omTimeInfo,
       severity: 'critica',
       badgeColor: 'bg-red-700 text-white border-red-800'
     });
   }
 
   // 2. Paradas da Linha
-  if (record.hasStoppage) {
-    const qty = record.stoppageQuantity || 1;
-    const reasons = (record.stoppageReasonsList && record.stoppageReasonsList.length > 0)
-      ? record.stoppageReasonsList.join(', ')
-      : (record.stoppageReason || 'Parada Operacional');
+  if (record.hasStoppage && (stopDetails.machineStopsCount > 0 || record.lineStatus === 'em_producao')) {
+    const qty = stopDetails.machineStopsCount || record.stoppageQuantity || 1;
+    const reasons = stopDetails.machineStoppages.length > 0
+      ? stopDetails.machineStoppages.map(s => `${s.reason} (${s.startTime}-${s.endTime} · ${s.durationMinutes} min)`).join('; ')
+      : ((record.stoppageReasonsList && record.stoppageReasonsList.length > 0)
+        ? record.stoppageReasonsList.join(', ')
+        : (record.stoppageReason || 'Parada Operacional'));
+    const durationSuffix = stopDetails.machineStopMinutes > 0
+      ? ` • ${formatMinutesToHoursAndMins(stopDetails.machineStopMinutes)}`
+      : '';
     list.push({
       type: 'parada',
-      label: `Linha Parada (${qty}x)`,
-      description: `Motivo: ${reasons}`,
-      severity: qty > 1 ? 'critica' : 'alta',
+      label: `Linha Parada (${qty}x${durationSuffix})`,
+      description: `Detalhamento: ${reasons}`,
+      severity: qty > 1 || stopDetails.machineStopMinutes >= 60 ? 'critica' : 'alta',
       badgeColor: 'bg-red-600 text-white border-red-700'
     });
   }

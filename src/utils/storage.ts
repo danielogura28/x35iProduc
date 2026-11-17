@@ -11,6 +11,7 @@ import {
   LineOperationalStatus,
   MACHINE_LIST
 } from '../types/production';
+import { getRecordStoppageDetails } from './deviationUtils';
 
 const STORAGE_KEY = 'extrucontrol_records_v3';
 const GOALS_KEY = 'extrucontrol_goals_v3';
@@ -558,64 +559,84 @@ export function exportToCSV(records: ProductionRecord[]): void {
     'Desvio Comunicado ao Líder',
     'Horário Comunicação Líder',
     'Houve Parada',
-    'Qtd de Paradas',
-    'Motivos das Paradas',
+    'Qtd Paradas Máquina',
+    'Tempo Parada Máquina (min)',
+    'Detalhamento Paradas Máquina (Horários e Motivos)',
+    'Qtd Paradas OM',
+    'Tempo Parada OM (min)',
+    'Detalhamento Paradas OM (Horários e Motivos)',
+    'Tempo Total Parado (min)',
     'Relato Desvios',
     'Tempo Análise (s)',
     'Documento Referência',
     'Qtd Fotos'
   ];
 
-  const rows = records.map(r => [
-    r.id,
-    new Date(r.timestamp).toLocaleString('pt-BR'),
-    r.machineId,
-    `"${r.lineStatus || 'em_producao'}"`,
-    `"${r.shift}"`,
-    `"${r.operatorName}"`,
-    `"${r.shiftLeader}"`,
-    `"${r.unableToAnalyzeReason?.replace(/"/g, '""') || ''}"`,
-    r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
-    `"${r.estimatedAnalysisTimeInShift?.replace(/"/g, '""') || ''}"`,
-    `"${r.setupMaterial || ''}"`,
-    `"${r.maintenanceOrderNumber || ''}"`,
-    `"${r.productionOrder || ''}"`,
-    `"${r.batchNumber || ''}"`,
-    `"${r.productName || ''}"`,
-    r.productivityKgh ?? '',
-    r.targetProductivityKgh ?? '',
-    r.rpm ?? '',
-    r.motorAmperes ?? '',
-    r.hasPreviousReferenceSheet ? 'Sim' : 'Não (Sem Ref.)',
-    r.prevProductivityKgh ?? '',
-    r.prevRpm ?? '',
-    r.prevMotorAmperes ?? '',
-    r.temperaturesConforming ? 'Sim' : (r.temperaturesConforming === false ? 'Não' : ''),
-    `"${r.dosers?.dos01?.value || ''}"`,
-    `"${r.dosers?.dos02?.value || ''}"`,
-    `"${r.dosers?.dos03?.value || ''}"`,
-    `"${r.dosers?.dos04?.value || ''}"`,
-    `"${r.dos02Homogenization || ''}"`,
-    r.sideFeederCurrentRpm ?? '',
-    r.sideFeederPreviousRpm ?? '',
-    `"${r.circulationSystemStatus || 'ativo'}"`,
-    `"${r.magnetStatus || ''}"`,
-    `"${r.sievePowderCondition || ''}"`,
-    r.sealerTempConforming ? 'Sim' : (r.sealerTempConforming === false ? 'Não' : ''),
-    r.labelCodesConforming ? 'Sim' : (r.labelCodesConforming === false ? 'Não' : ''),
-    `"${r.sealingQuality || ''}"`,
-    r.scaleCalibrationConforming ? 'Conforme / Válida' : (r.scaleCalibrationConforming === false ? 'Não Conforme / Vencida' : ''),
-    `"${r.scaleTagNumber || ''}"`,
-    r.deviationReportedToLeader ? 'Sim' : 'Não',
-    `"${r.deviationReportTime || ''}"`,
-    r.hasStoppage ? 'Sim' : 'Não',
-    r.stoppageQuantity || (r.hasStoppage ? 1 : 0),
-    `"${(r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || '')}"`,
-    `"${r.operationalDeviationsNotes?.replace(/"/g, '""') || ''}"`,
-    r.analysisDurationSeconds ?? 0,
-    `"PE_RG_034 Analise de processo"`,
-    r.photos.length
-  ]);
+  const rows = records.map(r => {
+    const details = getRecordStoppageDetails(r);
+    const machineDetailText = details.machineStoppages.length > 0
+      ? details.machineStoppages.map((s, idx) => `#${idx + 1} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+      : ((r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || ''));
+    const omDetailText = details.omStoppages.length > 0
+      ? details.omStoppages.map((s, idx) => `#${idx + 1} ${s.startTime}-${s.endTime} (${s.durationMinutes}m): ${s.reason}`).join(' | ')
+      : (r.hasMaintenanceOrder || r.lineStatus === 'manutencao' ? (r.maintenanceOrderNumber || 'OM') : '');
+
+    return [
+      r.id,
+      new Date(r.timestamp).toLocaleString('pt-BR'),
+      r.machineId,
+      `"${r.lineStatus || 'em_producao'}"`,
+      `"${r.shift}"`,
+      `"${r.operatorName}"`,
+      `"${r.shiftLeader}"`,
+      `"${r.unableToAnalyzeReason?.replace(/"/g, '""') || ''}"`,
+      r.canAnalyzeInCurrentShift !== undefined ? (r.canAnalyzeInCurrentShift ? 'Sim' : 'Não') : '',
+      `"${r.estimatedAnalysisTimeInShift?.replace(/"/g, '""') || ''}"`,
+      `"${r.setupMaterial || ''}"`,
+      `"${r.maintenanceOrderNumber || ''}"`,
+      `"${r.productionOrder || ''}"`,
+      `"${r.batchNumber || ''}"`,
+      `"${r.productName || ''}"`,
+      r.productivityKgh ?? '',
+      r.targetProductivityKgh ?? '',
+      r.rpm ?? '',
+      r.motorAmperes ?? '',
+      r.hasPreviousReferenceSheet ? 'Sim' : 'Não (Sem Ref.)',
+      r.prevProductivityKgh ?? '',
+      r.prevRpm ?? '',
+      r.prevMotorAmperes ?? '',
+      r.temperaturesConforming ? 'Sim' : (r.temperaturesConforming === false ? 'Não' : ''),
+      `"${r.dosers?.dos01?.value || ''}"`,
+      `"${r.dosers?.dos02?.value || ''}"`,
+      `"${r.dosers?.dos03?.value || ''}"`,
+      `"${r.dosers?.dos04?.value || ''}"`,
+      `"${r.dos02Homogenization || ''}"`,
+      r.sideFeederCurrentRpm ?? '',
+      r.sideFeederPreviousRpm ?? '',
+      `"${r.circulationSystemStatus || 'ativo'}"`,
+      `"${r.magnetStatus || ''}"`,
+      `"${r.sievePowderCondition || ''}"`,
+      r.sealerTempConforming ? 'Sim' : (r.sealerTempConforming === false ? 'Não' : ''),
+      r.labelCodesConforming ? 'Sim' : (r.labelCodesConforming === false ? 'Não' : ''),
+      `"${r.sealingQuality || ''}"`,
+      r.scaleCalibrationConforming ? 'Conforme / Válida' : (r.scaleCalibrationConforming === false ? 'Não Conforme / Vencida' : ''),
+      `"${r.scaleTagNumber || ''}"`,
+      r.deviationReportedToLeader ? 'Sim' : 'Não',
+      `"${r.deviationReportTime || ''}"`,
+      r.hasStoppage ? 'Sim' : 'Não',
+      details.machineStopsCount,
+      details.machineStopMinutes,
+      `"${machineDetailText.replace(/"/g, '""')}"`,
+      details.omStopsCount,
+      details.omStopMinutes,
+      `"${omDetailText.replace(/"/g, '""')}"`,
+      details.totalStopMinutes,
+      `"${r.operationalDeviationsNotes?.replace(/"/g, '""') || ''}"`,
+      r.analysisDurationSeconds ?? 0,
+      `"PE_RG_034 Analise de processo"`,
+      r.photos.length
+    ];
+  });
 
   const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(row => row.join(';'))].join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

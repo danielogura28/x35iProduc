@@ -54,6 +54,8 @@ import {
 import {
   formatAnalysisDuration,
   analyzeRecordDeviations,
+  getRecordStoppageDetails,
+  formatMinutesToHoursAndMins,
   DOCUMENT_IDENTIFIER,
   DOCUMENT_FULL_TITLE
 } from '../utils/deviationUtils';
@@ -187,7 +189,17 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
     const conformingPackaging = prodRecords.filter(r => r.labelCodesConforming && r.sealingQuality === 'conforme').length;
     const packagingCompliance = prodRecords.length > 0 ? Math.round((conformingPackaging / prodRecords.length) * 100) : 100;
 
-    const totalStoppages = filteredRecords.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+    let totalStoppages = 0;
+    let totalStopMinutes = 0;
+    let omStopMinutes = 0;
+    let omStopsCount = 0;
+    filteredRecords.forEach(r => {
+      const sd = getRecordStoppageDetails(r);
+      totalStoppages += sd.totalStopsCount;
+      totalStopMinutes += sd.totalStopMinutes;
+      omStopMinutes += sd.omStopMinutes;
+      omStopsCount += sd.omStopsCount;
+    });
     const totalOMs = filteredRecords.filter(r => r.lineStatus === 'manutencao' || r.hasMaintenanceOrder).length;
     const totalSetups = filteredRecords.filter(r => r.lineStatus === 'setup').length;
 
@@ -206,6 +218,9 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
       sheetCompliance,
       packagingCompliance,
       totalStoppages,
+      totalStopMinutes,
+      omStopMinutes,
+      omStopsCount,
       totalOMs,
       totalSetups
     };
@@ -270,9 +285,10 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         }
       }
 
-      if (r.hasStoppage) {
-        existing.stoppagesCount += r.stoppageQuantity || 1;
-        existing.stoppageMinutes += r.stoppageMinutes || 60;
+      const sd = getRecordStoppageDetails(r);
+      if (sd.totalStopsCount > 0 || sd.totalStopMinutes > 0) {
+        existing.stoppagesCount += sd.totalStopsCount;
+        existing.stoppageMinutes += sd.totalStopMinutes;
       }
 
       opMap.set(name, existing);
@@ -298,7 +314,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
     return list.sort((a, b) => b.avgKgh - a.avgKgh);
   }, [filteredRecords]);
 
-  // 4. PARETO DE PARADAS E INTERVENÇÕES (MINUTOS PERDIDOS) (Screenshot 2 - Card Esquerdo)
+  // 4. PARETO DE PARADAS E INTERVENÇÕES (MINUTOS PERDIDOS EXATOS)
   const stoppageInterventions = useMemo(() => {
     let manutencaoMins = 0;
     let manutencaoEvents = 0;
@@ -306,26 +322,28 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
     let preventivaEvents = 0;
     let setupMins = 0;
     let setupEvents = 0;
-    let outroMins = 0;
-    let outroEvents = 0;
+    let machineMins = 0;
+    let machineEvents = 0;
 
     for (const r of filteredRecords) {
-      if (r.lineStatus === 'manutencao' || r.hasMaintenanceOrder) {
-        manutencaoEvents += 1;
-        manutencaoMins += r.stoppageMinutes || 240;
-      } else if (r.lineStatus === 'preventiva') {
-        preventivaEvents += 1;
-        preventivaMins += r.stoppageMinutes || 180;
+      const sd = getRecordStoppageDetails(r);
+      if (sd.omStopsCount > 0 || sd.omStopMinutes > 0) {
+        manutencaoEvents += sd.omStopsCount;
+        manutencaoMins += sd.omStopMinutes;
+      }
+      if (r.lineStatus === 'preventiva') {
+        preventivaEvents += sd.machineStopsCount || 1;
+        preventivaMins += sd.machineStopMinutes;
       } else if (r.lineStatus === 'setup') {
-        setupEvents += 1;
-        setupMins += r.stoppageMinutes || 90;
-      } else if (r.hasStoppage) {
-        outroEvents += r.stoppageQuantity || 1;
-        outroMins += r.stoppageMinutes || 45;
+        setupEvents += sd.machineStopsCount || 1;
+        setupMins += sd.machineStopMinutes;
+      } else if (sd.machineStopsCount > 0 || sd.machineStopMinutes > 0) {
+        machineEvents += sd.machineStopsCount;
+        machineMins += sd.machineStopMinutes;
       }
     }
 
-    const maxMins = Math.max(1, manutencaoMins, preventivaMins, setupMins, outroMins);
+    const maxMins = Math.max(1, manutencaoMins, preventivaMins, setupMins, machineMins);
 
     return [
       {
@@ -333,32 +351,32 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         events: manutencaoEvents,
         mins: manutencaoMins,
         hours: Math.round((manutencaoMins / 60) * 10) / 10,
-        barPct: Math.round((manutencaoMins / maxMins) * 100),
+        barPct: manutencaoMins > 0 ? Math.round((manutencaoMins / maxMins) * 100) : 0,
         color: 'bg-red-800'
       },
       {
-        label: 'Preventiva Programada',
-        events: preventivaEvents,
-        mins: preventivaMins,
-        hours: Math.round((preventivaMins / 60) * 10) / 10,
-        barPct: Math.round((preventivaMins / maxMins) * 100),
-        color: 'bg-red-800'
+        label: 'Paradas Operacionais (Máquina)',
+        events: machineEvents,
+        mins: machineMins,
+        hours: Math.round((machineMins / 60) * 10) / 10,
+        barPct: machineMins > 0 ? Math.round((machineMins / maxMins) * 100) : 0,
+        color: 'bg-red-600'
       },
       {
         label: 'Setup / Troca de Material',
         events: setupEvents,
         mins: setupMins,
         hours: Math.round((setupMins / 60) * 10) / 10,
-        barPct: Math.round((setupMins / maxMins) * 100),
-        color: 'bg-red-800'
+        barPct: setupMins > 0 ? Math.round((setupMins / maxMins) * 100) : 0,
+        color: 'bg-amber-600'
       },
       {
-        label: 'Outro',
-        events: outroEvents,
-        mins: outroMins,
-        hours: Math.round((outroMins / 60) * 10) / 10,
-        barPct: outroMins > 0 ? Math.round((outroMins / maxMins) * 100) : 0,
-        color: 'bg-slate-300'
+        label: 'Preventiva Programada',
+        events: preventivaEvents,
+        mins: preventivaMins,
+        hours: Math.round((preventivaMins / 60) * 10) / 10,
+        barPct: preventivaMins > 0 ? Math.round((preventivaMins / maxMins) * 100) : 0,
+        color: 'bg-blue-700'
       }
     ];
   }, [filteredRecords]);
@@ -404,7 +422,8 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
       const attainment = targetKgh > 0 ? Math.round((avgKgh / targetKgh) * 100) : 0;
       const latest = recs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
       const status = latest?.lineStatus || (recs.length > 0 ? 'em_producao' : 'inativa');
-      const stops = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+      const stops = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+      const stopMinutes = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
       const deviations = latest ? analyzeRecordDeviations(latest) : [];
 
       const maxScale = 520;
@@ -419,6 +438,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         attainment,
         status,
         stops,
+        stopMinutes,
         latest,
         deviations,
         hasDeviation: deviations.length > 0,
@@ -448,7 +468,8 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         : 0;
       const kg = running.reduce((a, b) => a + ((b.productivityKgh || 0) * 4), 0);
       const sharePct = Math.round((kg / totalKgGlobal) * 100);
-      const stops = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+      const stops = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+      const stopMinutes = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
 
       return {
         ...s,
@@ -456,43 +477,116 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
         avgKgh,
         kg,
         sharePct,
-        stops
+        stops,
+        stopMinutes
       };
     });
   }, [filteredRecords, kpis.totalKg]);
 
-  // 8. PARETO: PRINCIPAIS OFENSORES (Screenshot 5 - Card Inferior)
+  // 8. PARETO: PRINCIPAIS OFENSORES (COM CONTAGEM E TEMPO EXATO EM MINUTOS)
   const paretoReasons = useMemo(() => {
-    const countMap: Record<string, number> = {};
+    const map: Record<string, { count: number; minutes: number }> = {};
     for (const r of filteredRecords) {
-      if (r.hasStoppage) {
+      const sd = getRecordStoppageDetails(r);
+      if (sd.allEntries.length > 0) {
+        for (const entry of sd.allEntries) {
+          const key = entry.category === 'om' ? `OM · ${entry.reason}` : entry.reason;
+          if (!map[key]) map[key] = { count: 0, minutes: 0 };
+          map[key].count += 1;
+          map[key].minutes += entry.durationMinutes;
+        }
+      } else if (r.hasStoppage) {
         if (r.stoppageReasonsList && r.stoppageReasonsList.length > 0) {
           for (const reason of r.stoppageReasonsList) {
-            countMap[reason] = (countMap[reason] || 0) + 1;
+            if (!map[reason]) map[reason] = { count: 0, minutes: 0 };
+            map[reason].count += 1;
+            map[reason].minutes += Math.round((sd.totalStopMinutes || 0) / r.stoppageReasonsList.length);
           }
         } else if (r.stoppageReason) {
-          countMap[r.stoppageReason] = (countMap[r.stoppageReason] || 0) + 1;
+          if (!map[r.stoppageReason]) map[r.stoppageReason] = { count: 0, minutes: 0 };
+          map[r.stoppageReason].count += sd.totalStopsCount || 1;
+          map[r.stoppageReason].minutes += sd.totalStopMinutes;
         } else {
-          countMap['Ajuste de Processo'] = (countMap['Ajuste de Processo'] || 0) + 1;
+          if (!map['Ajuste de Processo']) map['Ajuste de Processo'] = { count: 0, minutes: 0 };
+          map['Ajuste de Processo'].count += sd.totalStopsCount || 1;
+          map['Ajuste de Processo'].minutes += sd.totalStopMinutes;
         }
       }
     }
 
-    const sorted = Object.entries(countMap).sort((a, b) => b[1] - a[1]);
-    const totalEvents = sorted.reduce((a, b) => a + b[1], 0) || 1;
+    const sorted = Object.entries(map).sort((a, b) => b[1].minutes - a[1].minutes || b[1].count - a[1].count);
+    const totalBasis = sorted.reduce((a, b) => a + (b[1].minutes > 0 ? b[1].minutes : b[1].count), 0) || 1;
+    const useMinutesWeight = sorted.some(([, v]) => v.minutes > 0);
 
     let cumulative = 0;
-    return sorted.map(([reason, count]) => {
-      cumulative += count;
-      const pct = Math.round((count / totalEvents) * 100);
-      const cumPct = Math.round((cumulative / totalEvents) * 100);
+    return sorted.map(([reason, data]) => {
+      const val = useMinutesWeight ? data.minutes : data.count;
+      cumulative += val;
+      const pct = Math.round((val / totalBasis) * 100);
+      const cumPct = Math.round((cumulative / totalBasis) * 100);
       return {
         reason,
-        count,
+        count: data.count,
+        minutes: data.minutes,
         pct,
         cumPct
       };
     });
+  }, [filteredRecords]);
+
+  // Lista detalhada de todas as paradas individuais (Máquina e OM) registradas no período
+  const detailedStoppagesLog = useMemo(() => {
+    const items: Array<{
+      id: string;
+      timestamp: string;
+      machineId: MachineId;
+      shift: string;
+      operatorName: string;
+      category: 'maquina' | 'om';
+      omNumber?: string;
+      productionOrder?: string;
+      startTime: string;
+      endTime: string;
+      durationMinutes: number;
+      reason: string;
+    }> = [];
+
+    for (const r of filteredRecords) {
+      const sd = getRecordStoppageDetails(r);
+      sd.machineStoppages.forEach((s, idx) => {
+        items.push({
+          id: `${r.id}-m-${s.id || idx}`,
+          timestamp: r.timestamp,
+          machineId: r.machineId,
+          shift: r.shift,
+          operatorName: r.operatorName,
+          category: 'maquina',
+          productionOrder: r.productionOrder,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          durationMinutes: s.durationMinutes,
+          reason: s.reason
+        });
+      });
+      sd.omStoppages.forEach((s, idx) => {
+        items.push({
+          id: `${r.id}-om-${s.id || idx}`,
+          timestamp: r.timestamp,
+          machineId: r.machineId,
+          shift: r.shift,
+          operatorName: r.operatorName,
+          category: 'om',
+          omNumber: s.omNumber || r.maintenanceOrderNumber,
+          productionOrder: r.productionOrder,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          durationMinutes: s.durationMinutes,
+          reason: s.reason
+        });
+      });
+    }
+
+    return items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [filteredRecords]);
 
   // 9. AUDITORIA DE PROCESSO, QUALIDADE, BALANÇAS & 5S (SOLICITADO PELO USUÁRIO)
@@ -1031,20 +1125,22 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
 
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-3xl font-black font-mono tabular-nums tracking-tight text-red-500">
-                {kpis.totalStoppages}
+                {formatMinutesToHoursAndMins(kpis.totalStopMinutes)}
               </span>
-              <span className="text-xs font-semibold text-slate-400">evento(s)</span>
+              <span className="text-xs font-semibold text-slate-400">
+                ({kpis.totalStoppages} parada{kpis.totalStoppages === 1 ? '' : 's'})
+              </span>
             </div>
 
-            <div className="mt-2 text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Ordens Manutenção (OM): <strong className="text-white font-mono">{kpis.totalOMs}</strong></span>
+            <div className="mt-2 text-[11px] text-slate-400 flex items-center justify-between gap-2">
+              <span>OMs: <strong className="text-white font-mono">{kpis.totalOMs}</strong> ({formatMinutesToHoursAndMins(kpis.omStopMinutes)})</span>
               <span>Setups: <strong className="text-white font-mono">{kpis.totalSetups}</strong></span>
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800/80 text-[11px] text-slate-400 flex justify-between">
-            <span>Disponibilidade Mecânica:</span>
-            <span className="font-mono text-slate-300 font-semibold">Monitorada</span>
+            <span>Tempo Parado Total (Exato):</span>
+            <span className="font-mono text-amber-300 font-bold">{kpis.totalStopMinutes} min</span>
           </div>
         </div>
       </div>
@@ -1167,7 +1263,11 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
 
                 <div className="flex justify-between text-[11px] text-slate-400">
                   <span>{op.recordsCount} apontamentos</span>
-                  <span>{op.stoppagesCount === 0 ? 'Zero paradas' : `${op.stoppageMinutes} min paradas`}</span>
+                  <span>
+                    {op.stoppagesCount === 0 && op.stoppageMinutes === 0
+                      ? 'Zero paradas'
+                      : `${op.stoppagesCount} parada(s) • ${formatMinutesToHoursAndMins(op.stoppageMinutes)} (${op.stoppageMinutes} min)`}
+                  </span>
                 </div>
               </div>
             ))}
@@ -1358,10 +1458,10 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
                       </div>
                     )}
 
-                    <div className="text-right min-w-[55px]">
+                    <div className="text-right min-w-[75px]">
                       <span className="text-[10px] text-slate-400 block uppercase">PARADAS</span>
                       <span className={`font-mono font-bold ${f.stops > 0 ? 'text-red-700' : 'text-slate-400'}`}>
-                        {f.stops}
+                        {f.stops > 0 ? `${f.stops}x · ${formatMinutesToHoursAndMins(f.stopMinutes)}` : '0'}
                       </span>
                     </div>
 
@@ -1406,7 +1506,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
 
                   <div className="flex justify-between text-[11px] text-slate-500 font-mono">
                     <span>Vazão: <strong>{s.avgKgh} kg/h</strong></span>
-                    <span>{s.stops} parada(s)</span>
+                    <span>{s.stops} parada(s) · {formatMinutesToHoursAndMins(s.stopMinutes)}</span>
                   </div>
                 </div>
               ))}
@@ -1420,7 +1520,7 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               <span>PARETO: PRINCIPAIS OFENSORES</span>
             </h3>
             <p className="text-[11px] text-slate-500 mb-3">
-              Curva de impacto cumulativo de paradas operacionais
+              Curva de impacto cumulativo por tempo exato parado e ocorrências
             </p>
 
             {paretoReasons.length === 0 ? (
@@ -1429,14 +1529,14 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                {paretoReasons.slice(0, 3).map((p, idx) => (
+                {paretoReasons.slice(0, 5).map((p, idx) => (
                   <div key={p.reason} className="text-xs space-y-1">
-                    <div className="flex justify-between items-center">
-                      <span className="font-medium text-slate-800">
+                    <div className="flex justify-between items-center gap-2">
+                      <span className="font-medium text-slate-800 truncate">
                         <strong>{idx + 1}º</strong> {p.reason}
                       </span>
-                      <span className="font-mono text-slate-600 text-[11px]">
-                        {p.count}x ({p.pct}%) • Acum: {p.cumPct}%
+                      <span className="font-mono text-slate-600 text-[11px] shrink-0">
+                        {p.count}x • {formatMinutesToHoursAndMins(p.minutes)} ({p.pct}%)
                       </span>
                     </div>
                     <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
@@ -1452,6 +1552,95 @@ export const PowerBIDashboard: React.FC<PowerBIDashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 4.5 DETALHAMENTO EXATO DE PARADAS DE MÁQUINA & OM (HORÁRIOS INÍCIO/FIM E TEMPO EXATO) */}
+      {detailedStoppagesLog.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-red-100 text-red-900">
+                <Clock className="w-4 h-4" />
+              </span>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                  Detalhamento Cronológico de Paradas de Máquina & OM
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Contabilização exata de horário inicial, horário final, duração e motivo no período
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 font-mono text-xs font-bold bg-red-950 text-amber-300 px-3 py-1.5 rounded-lg self-start sm:self-auto">
+              <span>{detailedStoppagesLog.length} parada(s)</span>
+              <span>•</span>
+              <span>
+                Total Exato: {formatMinutesToHoursAndMins(detailedStoppagesLog.reduce((a, b) => a + b.durationMinutes, 0))} ({detailedStoppagesLog.reduce((a, b) => a + b.durationMinutes, 0)} min)
+              </span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase font-bold text-slate-600">
+                <tr>
+                  <th className="py-2.5 px-3">Data</th>
+                  <th className="py-2.5 px-3">Linha</th>
+                  <th className="py-2.5 px-3">Tipo</th>
+                  <th className="py-2.5 px-3">OM / OP</th>
+                  <th className="py-2.5 px-3">Motivo</th>
+                  <th className="py-2.5 px-3 text-center">Início</th>
+                  <th className="py-2.5 px-3 text-center">Final</th>
+                  <th className="py-2.5 px-3 text-right">Duração Exata</th>
+                  <th className="py-2.5 px-3">Operador</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {detailedStoppagesLog.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50">
+                    <td className="py-2 px-3 font-mono text-slate-600 whitespace-nowrap">
+                      {new Date(item.timestamp).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="py-2 px-3">
+                      <span className="px-2 py-0.5 rounded bg-red-950 text-white font-mono font-bold text-[11px]">
+                        {item.machineId}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 whitespace-nowrap">
+                      {item.category === 'om' ? (
+                        <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-900 font-bold border border-rose-300 text-[10px]">
+                          Parada OM
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-red-100 text-red-900 font-bold border border-red-200 text-[10px]">
+                          Máquina
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 px-3 font-mono font-semibold text-slate-800 whitespace-nowrap">
+                      {item.omNumber || item.productionOrder || '-'}
+                    </td>
+                    <td className="py-2 px-3 font-semibold text-slate-900">
+                      {item.reason}
+                    </td>
+                    <td className="py-2 px-3 text-center font-mono font-semibold text-slate-800">
+                      {item.startTime || '--:--'}
+                    </td>
+                    <td className="py-2 px-3 text-center font-mono font-semibold text-slate-800">
+                      {item.endTime || '--:--'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-mono font-bold text-red-800 whitespace-nowrap">
+                      {formatMinutesToHoursAndMins(item.durationMinutes)} ({item.durationMinutes}m)
+                    </td>
+                    <td className="py-2 px-3 text-slate-700 whitespace-nowrap">
+                      {item.operatorName}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* 5. PAINEL DE AUDITORIA OPERACIONAL & ESTABILIDADE (FICHA, ÍMÃS, BALANÇAS, PENEIRA & EMBALAGEM) */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">

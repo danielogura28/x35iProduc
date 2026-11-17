@@ -39,6 +39,8 @@ import { exportDailyReportToExcel } from '../utils/excelExport';
 import {
   formatAnalysisDuration,
   analyzeRecordDeviations,
+  getRecordStoppageDetails,
+  formatMinutesToHoursAndMins,
   DOCUMENT_IDENTIFIER,
   DOCUMENT_FULL_TITLE
 } from '../utils/deviationUtils';
@@ -102,7 +104,17 @@ export const DailyReport: React.FC<DailyReportProps> = ({
       ? Math.round((conformingSheets / prodRecords.length) * 100)
       : 100;
 
-    const totalStoppagesQty = dayRecords.reduce((acc, r) => acc + (r.stoppageQuantity || (r.hasStoppage ? 1 : 0)), 0);
+    let totalStoppagesQty = 0;
+    let totalStoppageMinutes = 0;
+    let machineStopMinutes = 0;
+    let omStopMinutes = 0;
+    dayRecords.forEach(r => {
+      const sd = getRecordStoppageDetails(r);
+      totalStoppagesQty += sd.totalStopsCount;
+      totalStoppageMinutes += sd.totalStopMinutes;
+      machineStopMinutes += sd.machineStopMinutes;
+      omStopMinutes += sd.omStopMinutes;
+    });
 
     const conformingLabels = prodRecords.filter(r => r.labelCodesConforming && r.sealingQuality === 'conforme').length;
     const labelComplianceRate = prodRecords.length > 0
@@ -172,6 +184,9 @@ export const DailyReport: React.FC<DailyReportProps> = ({
       estimatedTotalTons,
       sheetComplianceRate,
       totalStoppagesQty,
+      totalStoppageMinutes,
+      machineStopMinutes,
+      omStopMinutes,
       labelComplianceRate,
       maintenanceCount,
       setupCount,
@@ -227,7 +242,8 @@ export const DailyReport: React.FC<DailyReportProps> = ({
         ? Math.round(active.reduce((a, b) => a + (b.productivityKgh || 0), 0) / active.length)
         : 0;
       const volumeKg = active.reduce((a, b) => a + ((b.productivityKgh || 0) * 4), 0);
-      const stoppages = recs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+      const stoppages = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+      const stoppageMinutes = recs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
       const conforming = prod.length > 0
         ? Math.round((prod.filter(r => r.temperaturesConforming && r.parametersMatchPreviousSheet).length / prod.length) * 100)
         : 100;
@@ -238,6 +254,7 @@ export const DailyReport: React.FC<DailyReportProps> = ({
         avgKgh,
         volumeKg,
         stoppages,
+        stoppageMinutes,
         conforming
       };
     });
@@ -396,14 +413,16 @@ export const DailyReport: React.FC<DailyReportProps> = ({
           <span className="text-[11px] font-semibold text-slate-500 uppercase block">
             Paradas & Ocorrências
           </span>
-          <div className="mt-1 flex items-baseline gap-1.5">
-            <span className={`text-2xl font-black font-mono ${metrics.totalStoppagesQty === 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-              {metrics.totalStoppagesQty}
+          <div className="mt-1 flex items-baseline gap-1.5 flex-wrap">
+            <span className={`text-2xl font-black font-mono ${metrics.totalStoppagesQty === 0 && metrics.totalStoppageMinutes === 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+              {formatMinutesToHoursAndMins(metrics.totalStoppageMinutes)}
             </span>
-            <span className="text-xs font-semibold text-slate-500">parada(s)</span>
+            <span className="text-xs font-semibold text-slate-500">
+              ({metrics.totalStoppagesQty} parada{metrics.totalStoppagesQty === 1 ? '' : 's'})
+            </span>
           </div>
-          <span className="text-[11px] text-slate-400 block mt-0.5">
-            {metrics.maintenanceCount} OM(s) • {metrics.setupCount} Setup(s) • {metrics.notAnalyzedCount > 0 ? `${metrics.notAnalyzedCount} Não Analisada(s) • ` : ''}{metrics.reportedToLeaderCount} alinhados
+          <span className="text-[11px] text-slate-500 block mt-0.5 font-mono">
+            Máq: {formatMinutesToHoursAndMins(metrics.machineStopMinutes)} • OM: {formatMinutesToHoursAndMins(metrics.omStopMinutes)} ({metrics.maintenanceCount} OM)
           </span>
         </div>
       </div>
@@ -710,7 +729,9 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-slate-600">Paradas no Turno:</span>
-                    <span className={`font-bold font-mono ${s.stoppages > 0 ? 'text-red-700' : 'text-emerald-700'}`}>{s.stoppages}</span>
+                    <span className={`font-bold font-mono ${s.stoppages > 0 || s.stoppageMinutes > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                      {s.stoppages > 0 || s.stoppageMinutes > 0 ? `${s.stoppages}x (${formatMinutesToHoursAndMins(s.stoppageMinutes)})` : '0'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -775,7 +796,8 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                 const targetKgh = mActive[0]?.targetProductivityKgh || factoryGoals.targetAverageProductivityKgh;
                 const attainment = targetKgh > 0 ? Math.round((avgKgh / targetKgh) * 100) : 0;
 
-                const stoppages = mRecs.reduce((a, b) => a + (b.stoppageQuantity || (b.hasStoppage ? 1 : 0)), 0);
+                const stoppages = mRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopsCount, 0);
+                const stoppageMinutes = mRecs.reduce((a, b) => a + getRecordStoppageDetails(b).totalStopMinutes, 0);
 
                 const latest = mRecs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
                 const status = latest?.lineStatus || (mRecs.length > 0 ? 'em_producao' : undefined);
@@ -843,8 +865,8 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                       )}
                     </td>
                     <td className="py-3 px-3 text-center font-mono font-bold">
-                      <span className={`px-2 py-0.5 rounded ${stoppages > 0 ? 'bg-red-100 text-red-800' : 'text-slate-400'}`}>
-                        {stoppages}
+                      <span className={`px-2 py-0.5 rounded ${stoppages > 0 || stoppageMinutes > 0 ? 'bg-red-100 text-red-800' : 'text-slate-400'}`}>
+                        {stoppages > 0 || stoppageMinutes > 0 ? `${stoppages}x (${formatMinutesToHoursAndMins(stoppageMinutes)})` : '0'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-slate-700 max-w-[180px] truncate">
@@ -914,31 +936,58 @@ export const DailyReport: React.FC<DailyReportProps> = ({
                       </div>
 
                       {/* Event Details */}
-                      <div className="pt-1 flex flex-wrap gap-2 items-center">
-                        {r.hasStoppage && (
-                          <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded font-bold border border-red-200">
-                            Parada ({r.stoppageQuantity || 1}x): {(r.stoppageReasonsList && r.stoppageReasonsList.length > 0) ? r.stoppageReasonsList.join(', ') : (r.stoppageReason || 'Geral')}
-                          </span>
-                        )}
+                      {(() => {
+                        const sd = getRecordStoppageDetails(r);
+                        return (
+                          <div className="pt-1 space-y-1.5">
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {r.hasStoppage && sd.machineStopsCount > 0 && (
+                                <span className="px-2 py-0.5 bg-red-100 text-red-800 rounded font-bold border border-red-200">
+                                  Paradas Máquina ({sd.machineStopsCount}x · {formatMinutesToHoursAndMins(sd.machineStopMinutes)})
+                                </span>
+                              )}
 
-                        {r.lineStatus === 'manutencao' && (
-                          <span className="px-2 py-0.5 bg-red-100 text-red-900 rounded font-bold border border-red-300">
-                            OM: {r.maintenanceOrderNumber || 'Registrada'}
-                          </span>
-                        )}
+                              {(r.lineStatus === 'manutencao' || r.hasMaintenanceOrder) && (
+                                <span className="px-2 py-0.5 bg-rose-100 text-rose-900 rounded font-bold border border-rose-300">
+                                  OM: {r.maintenanceOrderNumber || 'Registrada'} ({sd.omStopsCount}x · {formatMinutesToHoursAndMins(sd.omStopMinutes)})
+                                </span>
+                              )}
 
-                        {r.lineStatus === 'setup' && (
-                          <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-semibold border border-amber-300">
-                            Setup: {r.setupMaterial || 'Material em troca'}
-                          </span>
-                        )}
+                              {r.lineStatus === 'setup' && (
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-semibold border border-amber-300">
+                                  Setup: {r.setupMaterial || 'Material em troca'}
+                                </span>
+                              )}
 
-                        {!r.temperaturesConforming && (
-                          <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-semibold border border-amber-300">
-                            Desvio Térmico: {r.temperatureDeviationZones || 'Zonas fora de ficha'}
-                          </span>
-                        )}
-                      </div>
+                              {!r.temperaturesConforming && (
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-semibold border border-amber-300">
+                                  Desvio Térmico: {r.temperatureDeviationZones || 'Zonas fora de ficha'}
+                                </span>
+                              )}
+                            </div>
+
+                            {sd.allEntries.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {sd.allEntries.map((entry, idx) => (
+                                  <span
+                                    key={entry.id || idx}
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-mono ${
+                                      entry.category === 'om'
+                                        ? 'bg-rose-50 border-rose-200 text-rose-900'
+                                        : 'bg-red-50 border-red-200 text-red-900'
+                                    }`}
+                                  >
+                                    <strong>{entry.category === 'om' ? `OM#${idx + 1}` : `#${idx + 1}`}:</strong>
+                                    <span>{entry.startTime}→{entry.endTime}</span>
+                                    <span className="font-bold">({entry.durationMinutes}m)</span>
+                                    <span className="font-sans">· {entry.reason}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {r.operationalDeviationsNotes && (
                         <p className="text-slate-700 bg-slate-50 p-2 rounded border border-slate-200 mt-1">

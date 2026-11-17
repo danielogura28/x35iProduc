@@ -120,6 +120,16 @@ export interface PhotoAttachment {
   timestamp: string;
 }
 
+export interface StoppageEntry {
+  id: string;
+  startTime: string; // Formato "HH:MM"
+  endTime: string;   // Formato "HH:MM"
+  durationMinutes: number; // Duração exata calculada em minutos
+  reason: StoppageReason;
+  omNumber?: string; // Opcional (para paradas vinculadas a OM)
+  notes?: string;
+}
+
 export interface ProductionRecord {
   id: string;
   timestamp: string; // ISO string
@@ -215,13 +225,17 @@ export interface ProductionRecord {
   deviationReportLeaderName?: string;
   deviationReportLeaderNotes?: string;
   
-  // Ocorrências e Paradas (Apenas Quantidade e Motivos, SEM horários)
+  // Ocorrências e Paradas (Quantidades, Horário Início/Fim Exatos e Motivos)
   hasStoppage?: boolean;
   stoppageQuantity?: number; // Quantidade de paradas
+  stoppages?: StoppageEntry[]; // Lista detalhada com horário inicial, final, duração exata e motivo
   stoppageReasonsList?: StoppageReason[]; // Motivos das paradas
   stoppageReason?: StoppageReason; // Principal motivo (retrocompatível)
-  stoppageMinutes?: number; // retrocompatível
+  stoppageMinutes?: number; // Soma exata dos minutos parados (máquina + OM)
   hasMaintenanceOrder?: boolean;
+  maintenanceOrderStopQuantity?: number; // Quantidade de paradas de OM
+  maintenanceOrderStops?: StoppageEntry[]; // Lista detalhada de paradas da OM
+  maintenanceOrderTotalMinutes?: number; // Soma exata dos minutos parados de OM
   operationalDeviationsNotes?: string;
   
   // Tempo de Análise Gasto pelo Usuário na Linha (em segundos)

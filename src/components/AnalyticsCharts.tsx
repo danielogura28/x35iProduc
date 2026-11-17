@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ProductionRecord, MACHINE_LIST } from '../types/production';
 import { BarChart3, Users, AlertOctagon, CheckCircle2, Clock } from 'lucide-react';
+import { getRecordStoppageDetails, formatMinutesToHoursAndMins } from '../utils/deviationUtils';
 
 interface AnalyticsChartsProps {
   records: ProductionRecord[];
@@ -48,50 +49,61 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ records }) => 
       if (status === 'em_producao' && r.temperaturesConforming && r.parametersMatchPreviousSheet) {
         map[r.operatorName].conformingCount += 1;
       }
-      if (r.hasStoppage || status !== 'em_producao') {
-        map[r.operatorName].stoppagesCount += 1;
-        map[r.operatorName].totalStopMinutes += r.stoppageMinutes || (status !== 'em_producao' ? 60 : 0);
+      const stopDetails = getRecordStoppageDetails(r);
+      if (stopDetails.totalStopsCount > 0 || stopDetails.totalStopMinutes > 0) {
+        map[r.operatorName].stoppagesCount += stopDetails.totalStopsCount;
+        map[r.operatorName].totalStopMinutes += stopDetails.totalStopMinutes;
       }
     });
 
     return Object.entries(map).map(([name, data]) => {
-      const activeCount = data.count - data.stoppagesCount;
-      const avgProd = activeCount > 0 ? Math.round(data.totalProd / activeCount) : 0;
+      const prodRecords = records.filter(rec => rec.operatorName === name && (rec.lineStatus || 'em_producao') === 'em_producao' && !rec.hasStoppage).length;
+      const avgProd = prodRecords > 0 ? Math.round(data.totalProd / prodRecords) : 0;
       const complianceRate = data.count > 0 ? Math.round((data.conformingCount / data.count) * 100) : 100;
       return {
         name,
         avgProd,
         complianceRate,
         checksCount: data.count,
-        stopMinutes: data.totalStopMinutes
+        stopMinutes: data.totalStopMinutes,
+        stopCount: data.stoppagesCount
       };
     }).sort((a, b) => b.avgProd - a.avgProd);
   }, [records]);
 
   const stoppageReasonsData = useMemo(() => {
     const map: Record<string, { minutes: number; count: number }> = {};
-    records.forEach(r => {
+    filteredRecords.forEach(r => {
       const status = r.lineStatus || 'em_producao';
-      if (status === 'manutencao') {
+      const stopDetails = getRecordStoppageDetails(r);
+
+      if (stopDetails.allEntries.length > 0) {
+        stopDetails.allEntries.forEach(entry => {
+          const label = entry.category === 'om' ? `OM · ${entry.reason}` : entry.reason;
+          if (!map[label]) map[label] = { minutes: 0, count: 0 };
+          map[label].minutes += entry.durationMinutes;
+          map[label].count += 1;
+        });
+      } else if (status === 'manutencao') {
         const reason = 'Manutenção Corretiva (OM)';
         if (!map[reason]) map[reason] = { minutes: 0, count: 0 };
-        map[reason].minutes += r.stoppageMinutes || 240;
-        map[reason].count += 1;
+        map[reason].minutes += stopDetails.omStopMinutes || 0;
+        map[reason].count += stopDetails.omStopsCount || 1;
       } else if (status === 'setup') {
         const reason = 'Setup / Troca de Material';
         if (!map[reason]) map[reason] = { minutes: 0, count: 0 };
-        map[reason].minutes += r.stoppageMinutes || 90;
+        map[reason].minutes += stopDetails.machineStopMinutes || 0;
         map[reason].count += 1;
       } else if (status === 'preventiva') {
         const reason = 'Preventiva Programada';
         if (!map[reason]) map[reason] = { minutes: 0, count: 0 };
-        map[reason].minutes += r.stoppageMinutes || 180;
+        map[reason].minutes += stopDetails.machineStopMinutes || 0;
         map[reason].count += 1;
       } else if (r.hasStoppage) {
         const reason = r.stoppageReason || 'Outro';
         if (!map[reason]) map[reason] = { minutes: 0, count: 0 };
-        map[reason].minutes += r.stoppageMinutes || 0;
-        map[reason].count += 1;
+        map[reason].minutes += stopDetails.machineStopMinutes || 0;
+        map[reason].count += stopDetails.machineStopsCount || 1;
       }
     });
 
@@ -99,8 +111,8 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ records }) => 
       reason,
       minutes: d.minutes,
       count: d.count
-    })).sort((a, b) => b.minutes - a.minutes);
-  }, [records]);
+    })).sort((a, b) => b.minutes - a.minutes || b.count - a.count);
+  }, [filteredRecords]);
 
   const qualityIssuesData = useMemo(() => {
     let tempDeviations = 0;
@@ -286,7 +298,11 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ records }) => 
 
                     <div className="flex justify-between text-[10px] text-slate-400">
                       <span>{op.checksCount} apontamentos</span>
-                      <span>{op.stopMinutes > 0 ? `${op.stopMinutes} min paradas` : 'Zero paradas'}</span>
+                      <span>
+                        {op.stopCount > 0 || op.stopMinutes > 0
+                          ? `${op.stopCount} parada(s) • ${formatMinutesToHoursAndMins(op.stopMinutes)}`
+                          : 'Zero paradas'}
+                      </span>
                     </div>
                   </div>
                 );

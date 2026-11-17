@@ -26,6 +26,7 @@ import {
   Pencil
 } from 'lucide-react';
 import { MAX_STORAGE_RECORDS } from '../utils/storage';
+import { getRecordStoppageDetails, formatMinutesToHoursAndMins } from '../utils/deviationUtils';
 
 interface HistoryTableProps {
   records: ProductionRecord[];
@@ -359,6 +360,17 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                                 <span>Desvio Ficha</span>
                               </span>
                             )}
+                            {(() => {
+                              const stopInfo = getRecordStoppageDetails(r);
+                              if (stopInfo.totalStopsCount > 0) {
+                                return (
+                                  <span className="text-[9px] text-red-800 font-mono font-bold bg-red-50 border border-red-200 px-1.5 py-0.2 rounded">
+                                    ⏱ {stopInfo.totalStopsCount} par. • {formatMinutesToHoursAndMins(stopInfo.totalStopMinutes)}
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                             {r.scaleCalibrationConforming === false || r.scaleIdentificationConforming === false || r.scaleCalibrationStatus === 'vencida' ? (
                               <span className="text-[9px] text-red-700 font-bold bg-red-50 border border-red-200 px-1.5 py-0.2 rounded">
                                 Desvio Balança
@@ -370,7 +382,16 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                             )}
                           </div>
                         ) : (
-                          <span className="text-slate-400">-</span>
+                          (() => {
+                            const stopInfo = getRecordStoppageDetails(r);
+                            return stopInfo.totalStopMinutes > 0 ? (
+                              <span className="text-[10px] text-red-800 font-mono font-bold bg-red-50 border border-red-200 px-1.5 py-0.5 rounded">
+                                ⏱ {formatMinutesToHoursAndMins(stopInfo.totalStopMinutes)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            );
+                          })()
                         )}
                       </td>
 
@@ -486,19 +507,60 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
               </div>
 
               {/* Se Manutenção */}
-              {activeRecordForModal.lineStatus === 'manutencao' && (
-                <div className="bg-red-50 border border-red-200 p-4 rounded-xl space-y-2">
-                  <span className="text-xs font-bold text-red-900 uppercase">Ordem de Manutenção</span>
-                  <div className="text-xl font-mono font-bold text-red-950">
-                    {activeRecordForModal.maintenanceOrderNumber}
+              {activeRecordForModal.lineStatus === 'manutencao' && (() => {
+                const stopDetails = getRecordStoppageDetails(activeRecordForModal);
+                return (
+                  <div className="bg-red-50 border border-red-200 p-4 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-red-900 uppercase block">Ordem de Manutenção</span>
+                        <div className="text-xl font-mono font-bold text-red-950">
+                          {activeRecordForModal.maintenanceOrderNumber}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-red-700 uppercase font-bold block">Tempo Total OM</span>
+                        <span className="font-mono font-bold text-sm text-red-900 bg-red-100 px-2.5 py-1 rounded border border-red-300">
+                          {formatMinutesToHoursAndMins(stopDetails.omStopMinutes)} ({stopDetails.omStopMinutes} min)
+                        </span>
+                      </div>
+                    </div>
+
+                    {stopDetails.omStoppages.length > 0 && (
+                      <div className="bg-white rounded-lg border border-red-200 overflow-hidden">
+                        <table className="w-full text-[11px] text-left">
+                          <thead className="bg-red-100/80 text-red-950 font-bold uppercase text-[10px]">
+                            <tr>
+                              <th className="py-1.5 px-2.5">#</th>
+                              <th className="py-1.5 px-2.5">Início</th>
+                              <th className="py-1.5 px-2.5">Final</th>
+                              <th className="py-1.5 px-2.5">Duração</th>
+                              <th className="py-1.5 px-2.5">Motivo</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-red-100">
+                            {stopDetails.omStoppages.map((s, idx) => (
+                              <tr key={s.id || idx}>
+                                <td className="py-1.5 px-2.5 font-mono font-bold">OM #{idx + 1}</td>
+                                <td className="py-1.5 px-2.5 font-mono">{s.startTime || '--:--'}</td>
+                                <td className="py-1.5 px-2.5 font-mono">{s.endTime || '--:--'}</td>
+                                <td className="py-1.5 px-2.5 font-mono font-bold text-red-800">{formatMinutesToHoursAndMins(s.durationMinutes)}</td>
+                                <td className="py-1.5 px-2.5 font-semibold">{s.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {activeRecordForModal.operationalDeviationsNotes && (
+                      <p className="text-xs text-red-800 pt-2 border-t border-red-200">
+                        <strong>Observações:</strong> {activeRecordForModal.operationalDeviationsNotes}
+                      </p>
+                    )}
                   </div>
-                  {activeRecordForModal.operationalDeviationsNotes && (
-                    <p className="text-xs text-red-800 pt-2 border-t border-red-200">
-                      <strong>Observações:</strong> {activeRecordForModal.operationalDeviationsNotes}
-                    </p>
-                  )}
-                </div>
-              )}
+                );
+              })()}
 
               {/* Se Setup */}
               {activeRecordForModal.lineStatus === 'setup' && (
@@ -743,26 +805,95 @@ export const HistoryTable: React.FC<HistoryTableProps> = ({
                     </div>
                   )}
 
-                  {/* Paradas de Máquina (Quantidade e Motivos) */}
-                  {activeRecordForModal.hasStoppage && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg space-y-1">
-                      <div className="flex items-center justify-between text-xs font-bold text-red-950">
-                        <span>Paradas de Máquina no Período</span>
-                        <span className="font-mono bg-red-200 px-2 py-0.5 rounded text-[11px]">
-                          {activeRecordForModal.stoppageQuantity || 1} parada(s)
-                        </span>
+                  {/* Paradas de Máquina e OM (Com Horários Início/Final e Duração Exata) */}
+                  {(activeRecordForModal.hasStoppage || activeRecordForModal.hasMaintenanceOrder) && (() => {
+                    const stopInfo = getRecordStoppageDetails(activeRecordForModal);
+                    return (
+                      <div className="space-y-2.5">
+                        {activeRecordForModal.hasStoppage && (
+                          <div className="p-3 bg-red-50 border border-red-200 rounded-lg space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-red-950">
+                              <span>Paradas de Máquina no Período</span>
+                              <span className="font-mono bg-red-200 px-2 py-0.5 rounded text-[11px]">
+                                {stopInfo.machineStopsCount} parada(s) • {formatMinutesToHoursAndMins(stopInfo.machineStopMinutes)} ({stopInfo.machineStopMinutes} min)
+                              </span>
+                            </div>
+                            {stopInfo.machineStoppages.length > 0 ? (
+                              <div className="bg-white rounded border border-red-200 overflow-hidden">
+                                <table className="w-full text-[11px] text-left">
+                                  <thead className="bg-red-100/70 text-red-950 font-bold text-[10px] uppercase">
+                                    <tr>
+                                      <th className="py-1 px-2">#</th>
+                                      <th className="py-1 px-2">Início</th>
+                                      <th className="py-1 px-2">Final</th>
+                                      <th className="py-1 px-2">Duração</th>
+                                      <th className="py-1 px-2">Motivo</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-red-100">
+                                    {stopInfo.machineStoppages.map((s, idx) => (
+                                      <tr key={s.id || idx}>
+                                        <td className="py-1 px-2 font-mono font-bold">#{idx + 1}</td>
+                                        <td className="py-1 px-2 font-mono">{s.startTime || '--:--'}</td>
+                                        <td className="py-1 px-2 font-mono">{s.endTime || '--:--'}</td>
+                                        <td className="py-1 px-2 font-mono font-bold text-red-800">{formatMinutesToHoursAndMins(s.durationMinutes)}</td>
+                                        <td className="py-1 px-2 font-semibold">{s.reason}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : activeRecordForModal.stoppageReasonsList && activeRecordForModal.stoppageReasonsList.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {activeRecordForModal.stoppageReasonsList.map((m, idx) => (
+                                  <span key={idx} className="px-2 py-0.5 bg-red-100 text-red-900 rounded text-[10px] font-semibold border border-red-300">
+                                    {m}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {activeRecordForModal.hasMaintenanceOrder && (
+                          <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-rose-950">
+                              <span>Ordem de Manutenção: <span className="font-mono">{activeRecordForModal.maintenanceOrderNumber}</span></span>
+                              <span className="font-mono bg-rose-200 px-2 py-0.5 rounded text-[11px]">
+                                {stopInfo.omStopsCount} parada(s) OM • {formatMinutesToHoursAndMins(stopInfo.omStopMinutes)} ({stopInfo.omStopMinutes} min)
+                              </span>
+                            </div>
+                            {stopInfo.omStoppages.length > 0 && (
+                              <div className="bg-white rounded border border-rose-200 overflow-hidden">
+                                <table className="w-full text-[11px] text-left">
+                                  <thead className="bg-rose-100/70 text-rose-950 font-bold text-[10px] uppercase">
+                                    <tr>
+                                      <th className="py-1 px-2">#</th>
+                                      <th className="py-1 px-2">Início</th>
+                                      <th className="py-1 px-2">Final</th>
+                                      <th className="py-1 px-2">Duração</th>
+                                      <th className="py-1 px-2">Motivo</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-rose-100">
+                                    {stopInfo.omStoppages.map((s, idx) => (
+                                      <tr key={s.id || idx}>
+                                        <td className="py-1 px-2 font-mono font-bold">OM #{idx + 1}</td>
+                                        <td className="py-1 px-2 font-mono">{s.startTime || '--:--'}</td>
+                                        <td className="py-1 px-2 font-mono">{s.endTime || '--:--'}</td>
+                                        <td className="py-1 px-2 font-mono font-bold text-rose-800">{formatMinutesToHoursAndMins(s.durationMinutes)}</td>
+                                        <td className="py-1 px-2 font-semibold">{s.reason}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      {activeRecordForModal.stoppageReasonsList && activeRecordForModal.stoppageReasonsList.length > 0 && (
-                        <div className="flex flex-wrap gap-1 pt-1">
-                          {activeRecordForModal.stoppageReasonsList.map((m, idx) => (
-                            <span key={idx} className="px-2 py-0.5 bg-red-100 text-red-900 rounded text-[10px] font-semibold border border-red-300">
-                              {m}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    );
+                  })()}
                 </>
               )}
 

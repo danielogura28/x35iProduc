@@ -29,7 +29,9 @@ import { GlobalLineStatusModal } from './GlobalLineStatusModal';
 import { 
   analyzeAllLinesDeviations, 
   formatAnalysisDuration, 
-  DOCUMENT_FULL_TITLE 
+  DOCUMENT_FULL_TITLE,
+  getRecordStoppageDetails,
+  formatMinutesToHoursAndMins
 } from '../utils/deviationUtils';
 
 interface LineMonitorProps {
@@ -306,12 +308,16 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
 
           if (latest) {
             const status = latest.lineStatus || 'em_producao';
+            const stopDetails = getRecordStoppageDetails(latest);
             if (status === 'em_producao') {
               if (latest.hasStoppage) {
+                const durSuffix = stopDetails.totalStopMinutes > 0
+                  ? ` · ${formatMinutesToHoursAndMins(stopDetails.totalStopMinutes)}`
+                  : '';
                 statusTheme = {
                   border: 'border-amber-300 ring-1 ring-amber-100',
                   badgeBg: 'bg-amber-100 text-amber-900 border-amber-300',
-                  label: `Produção (Parada: ${latest.stoppageReason || 'Ajuste'})`,
+                  label: `Parada (${stopDetails.machineStopsCount || 1}x${durSuffix})`,
                   icon: <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
                 };
               } else {
@@ -555,24 +561,41 @@ export const LineMonitor: React.FC<LineMonitorProps> = ({
                       </>
                     ) : latest.lineStatus === 'manutencao' ? (
                       /* When in Maintenance */
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-red-900 font-bold uppercase flex items-center gap-1.5">
-                            <Wrench className="w-4 h-4 text-red-600" />
-                            Ordem de Manutenção
-                          </span>
-                          <span className="font-mono font-bold text-sm text-red-900 bg-white px-2 py-0.5 rounded border border-red-300">
-                            {latest.maintenanceOrderNumber}
-                          </span>
-                        </div>
-                        <p className="text-red-800 text-[11px]">
-                          {latest.operationalDeviationsNotes || 'Intervenção técnica corretiva em andamento pela equipe de manutenção.'}
-                        </p>
-                        <div className="text-[11px] text-red-700 pt-1 border-t border-red-200 flex justify-between">
-                          <span>Registrado por: <strong>{latest.operatorName}</strong></span>
-                          <span>{timeAgoString}</span>
-                        </div>
-                      </div>
+                      (() => {
+                        const omDetails = getRecordStoppageDetails(latest);
+                        return (
+                          <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-red-900 font-bold uppercase flex items-center gap-1.5">
+                                <Wrench className="w-4 h-4 text-red-600" />
+                                Ordem de Manutenção
+                              </span>
+                              <span className="font-mono font-bold text-sm text-red-900 bg-white px-2 py-0.5 rounded border border-red-300">
+                                {latest.maintenanceOrderNumber}
+                              </span>
+                            </div>
+                            {omDetails.omStoppages.length > 0 && (
+                              <div className="bg-white/90 border border-red-200 rounded p-1.5 space-y-0.5 text-[10px] font-mono text-red-900">
+                                <div className="font-bold">
+                                  ⏱ {omDetails.omStopsCount} parada(s) • Total: {formatMinutesToHoursAndMins(omDetails.omStopMinutes)}
+                                </div>
+                                {omDetails.omStoppages.slice(0, 2).map((s, idx) => (
+                                  <div key={s.id || idx} className="truncate text-red-800">
+                                    #{idx + 1}: {s.startTime}→{s.endTime} ({s.durationMinutes}m) · {s.reason}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-red-800 text-[11px]">
+                              {latest.operationalDeviationsNotes || 'Intervenção técnica corretiva em andamento pela equipe de manutenção.'}
+                            </p>
+                            <div className="text-[11px] text-red-700 pt-1 border-t border-red-200 flex justify-between">
+                              <span>Registrado por: <strong>{latest.operatorName}</strong></span>
+                              <span>{timeAgoString}</span>
+                            </div>
+                          </div>
+                        );
+                      })()
                     ) : latest.lineStatus === 'setup' ? (
                       /* When in Setup */
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2 text-xs">
